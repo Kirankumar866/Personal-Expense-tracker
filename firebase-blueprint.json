@@ -1,0 +1,171 @@
+{
+  "entities": {
+    "Expense": {
+      "title": "Expense",
+      "description": "An expense logged by a roommate with category, amount, split rule, and payment details.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the expense",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the user who logged this expense",
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "description": "Description or merchant name of the expense",
+          "maxLength": 256
+        },
+        "amount": {
+          "type": "number",
+          "description": "Expense dollar amount"
+        },
+        "category": {
+          "type": "string",
+          "description": "Category key matching active categories",
+          "maxLength": 64
+        },
+        "date": {
+          "type": "string",
+          "description": "ISO date string of the transaction",
+          "maxLength": 64
+        },
+        "paidBy": {
+          "type": "string",
+          "description": "Who paid: 'me' or 'friend'",
+          "enum": ["me", "friend"]
+        },
+        "split": {
+          "type": "string",
+          "description": "Split rule: 'equal' or 'none'",
+          "enum": ["equal", "none"]
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional notes or AI receipt extraction context",
+          "maxLength": 2048
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp when the expense was created",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp when the expense was last updated",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "userId", "title", "amount", "category", "date", "paidBy", "split", "createdAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Personalized configuration for roommate tracking including names, currency, and budgets.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "maxLength": 128
+        },
+        "meName": {
+          "type": "string",
+          "description": "Display name of the primary user",
+          "maxLength": 64
+        },
+        "friendName": {
+          "type": "string",
+          "description": "Display name of the roommate",
+          "maxLength": 64
+        },
+        "currency": {
+          "type": "string",
+          "description": "Currency symbol",
+          "maxLength": 16
+        },
+        "monthlyBudget": {
+          "type": "number",
+          "description": "Target monthly budget ceiling"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp when profile was last updated",
+          "maxLength": 64
+        }
+      },
+      "required": ["userId", "meName", "friendName", "currency", "monthlyBudget"]
+    },
+    "Activity": {
+      "title": "Activity",
+      "description": "Real-time activity feed event capturing actions taken across devices.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the activity item",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID who performed the action",
+          "maxLength": 128
+        },
+        "userName": {
+          "type": "string",
+          "description": "Display name of the actor",
+          "maxLength": 64
+        },
+        "action": {
+          "type": "string",
+          "description": "The category of activity (e.g. logged_expense, scanned_receipt, settled)",
+          "maxLength": 64
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable summary of the action",
+          "maxLength": 512
+        },
+        "amount": {
+          "type": "number",
+          "description": "Optional associated amount"
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "ISO timestamp of the event",
+          "maxLength": 64
+        }
+      },
+      "required": ["id", "userId", "action", "description", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/expenses/{expenseId}": {
+      "schema": {
+        "$ref": "#/entities/Expense"
+      },
+      "description": "Production real database table for live expenses."
+    },
+    "/users/{userId}/demo_expenses/{expenseId}": {
+      "schema": {
+        "$ref": "#/entities/Expense"
+      },
+      "description": "Sandbox test database table for dummy testing data."
+    },
+    "/users/{userId}/profile/config": {
+      "schema": {
+        "$ref": "#/entities/UserProfile"
+      },
+      "description": "User profile, budget limits, and roommate settings."
+    },
+    "/users/{userId}/activities/{activityId}": {
+      "schema": {
+        "$ref": "#/entities/Activity"
+      },
+      "description": "Real-time stream of user and roommate activity events."
+    }
+  }
+}

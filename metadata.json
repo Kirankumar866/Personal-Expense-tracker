@@ -1,0 +1,6 @@
+{
+  "name": "Lumen — Apple-Style Expense & Budget Tracker",
+  "description": "Minimalist Apple-inspired daily expense logger and comparative budget dashboard for students and roommates with weekly & monthly pacing analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
