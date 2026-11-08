@@ -27,7 +27,7 @@ interface ComparisonDashboardProps {
   monthComp: PeriodComparison;
   weekComp: PeriodComparison & { dailyBreakdown: any[] };
   allExpenses: Expense[];
-  userFilter: 'all' | 'me' | 'friend';
+  userFilter: string;
   profile: UserProfile;
 }
 

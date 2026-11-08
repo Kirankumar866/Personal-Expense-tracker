@@ -34,7 +34,7 @@ import { PaidByBadge } from './PaidByBadge';
 
 interface MonthlyLogsViewProps {
   expenses: Expense[];
-  userFilter: 'all' | 'me' | 'friend';
+  userFilter: string;
   profile: UserProfile;
 }
 

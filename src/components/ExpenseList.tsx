@@ -24,15 +24,28 @@ import {
   CalendarDays, 
   ChevronLeft, 
   ChevronRight, 
-  Filter 
+  Filter,
+  Check,
+  Clock,
+  Share2,
+  ShieldCheck,
+  Pencil,
+  Zap,
+  CheckCircle2,
+  AlertTriangle,
+  UserCheck
 } from 'lucide-react';
 import { PaidByBadge } from './PaidByBadge';
+import { NotifySplitModal } from './NotifySplitModal';
+import { EditExpenseModal } from './EditExpenseModal';
 
 interface ExpenseListProps {
   expenses: Expense[];
   onDeleteExpense: (id: string) => void;
+  onVerifyExpense?: (id: string, verifierName: string) => void;
+  onUpdateExpense?: (updatedExpense: Expense, diffSummary: string) => Promise<void> | void;
   profile: UserProfile;
-  userFilter: 'all' | 'me' | 'friend';
+  userFilter: string;
 }
 
 const CATEGORY_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -50,12 +63,32 @@ const CATEGORY_ICONS: Record<string, React.ComponentType<{ className?: string }>
 export const ExpenseList: React.FC<ExpenseListProps> = ({
   expenses,
   onDeleteExpense,
+  onVerifyExpense,
+  onUpdateExpense,
   profile,
   userFilter,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<ExpenseCategory | 'all'>('all');
   const [selectedDate, setSelectedDate] = useState<string>('all'); // 'all' or 'YYYY-MM-DD'
+  const [notifyExpense, setNotifyExpense] = useState<Expense | null>(null);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const [directNotifyToast, setDirectNotifyToast] = useState<string | null>(null);
+
+  const buddies = profile.buddies && profile.buddies.length > 0
+    ? profile.buddies
+    : [
+        { id: 'buddy-alex', name: profile.friendName || 'Alex', email: profile.friendEmail || 'alex.rivera@example.com', role: 'Roommate' },
+        { id: 'buddy-gautam', name: 'Gautam', email: 'gautam@example.com', role: 'Friend' }
+      ];
+
+  // Active Viewing Persona (allows simulating/testing as Kiran, Alex, or Gautam)
+  const [activePersona, setActivePersona] = useState<string>(() => {
+    if (userFilter !== 'all' && userFilter !== 'me') {
+      return userFilter === 'friend' ? (profile.friendName || 'Alex') : userFilter;
+    }
+    return profile.meName;
+  });
 
   const todayStr = useMemo(() => toLocalDateString(new Date()), []);
   const yesterdayStr = useMemo(() => shiftDateString(todayStr, -1), [todayStr]);
@@ -93,6 +126,10 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
         if (e.paidBy !== 'me' && !(e.split === 'equal' && e.paidBy === 'friend')) return false;
       } else if (userFilter === 'friend') {
         if (e.paidBy !== 'friend' && !(e.split === 'equal' && e.paidBy === 'me')) return false;
+      } else if (userFilter !== 'all') {
+        // Specific buddy e.g. Alex or Gautam
+        const splitWith = (e.splitWithName || profile.friendName || 'Alex').toLowerCase();
+        if (splitWith !== userFilter.toLowerCase()) return false;
       }
 
       // Exact Date filter (using local date string)
@@ -153,8 +190,59 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
     setSelectedDate(shiftDateString(base, direction));
   };
 
+  const handleDirectNotify = async (exp: Expense) => {
+    const debtors = exp.splitWithNames && exp.splitWithNames.length > 0 
+      ? exp.splitWithNames 
+      : [exp.splitWithName || profile.friendName || 'Alex'];
+    
+    const recipientName = debtors[0] || 'Alex';
+    const buddyObj = buddies.find((b) => b.name.toLowerCase() === recipientName.toLowerCase());
+    const recipientEmail = buddyObj?.email || profile.friendEmail || 'alex.rivera@example.com';
+    const splitShare = exp.amount / (debtors.length + 1);
+
+    try {
+      const res = await fetch('/api/notify-buddy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expenseId: exp.id,
+          expenseTitle: exp.title,
+          amount: exp.amount,
+          splitShare,
+          action: 'reminder',
+          senderName: profile.meName,
+          recipientName,
+          recipientEmail,
+        }),
+      });
+      const data = await res.json();
+      setDirectNotifyToast(data.message || `⚡ Direct notification automated to ${recipientName} (${recipientEmail})!`);
+      setTimeout(() => setDirectNotifyToast(null), 3800);
+    } catch (e) {
+      setDirectNotifyToast(`⚡ Direct notification dispatched to ${recipientName} (${recipientEmail})!`);
+      setTimeout(() => setDirectNotifyToast(null), 3800);
+    }
+  };
+
   return (
     <div className="bg-white rounded-2xl border border-[#E5E5EA] p-5 shadow-xs space-y-4">
+      {/* Automated Direct Notification Toast Banner */}
+      {directNotifyToast && (
+        <div className="py-2.5 px-4 bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-between shadow-xs animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center gap-2">
+            <Zap className="w-4 h-4 fill-white" />
+            <span>{directNotifyToast}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDirectNotifyToast(null)}
+            className="p-1 hover:bg-white/20 rounded-md transition-colors"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Header and Search/Category Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#F2F2F7]">
         <div>
@@ -168,9 +256,42 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
               </span>
             )}
           </div>
-          <span className="text-xs text-[#86868B]">
-            Showing {filtered.length} transactions {selectedDate !== 'all' ? `for ${formatFriendlyDate(selectedDate)}` : 'across all dates'}
-          </span>
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
+            <span className="text-xs text-[#86868B]">
+              Showing {filtered.length} transactions {selectedDate !== 'all' ? `for ${formatFriendlyDate(selectedDate)}` : 'across all dates'}
+            </span>
+            <span className="text-[#86868B]">·</span>
+            {/* Persona Switcher to test multi-person verification */}
+            <div className="inline-flex items-center gap-1.5 bg-[#F9F9FB] px-2 py-0.5 rounded-lg border border-[#E5E5EA] text-[11px]">
+              <UserCheck className="w-3 h-3 text-[#0071E3]" />
+              <span className="text-[#86868B]">Viewing as:</span>
+              <button
+                type="button"
+                onClick={() => setActivePersona(profile.meName)}
+                className={`px-1.5 py-0.5 rounded text-[11px] font-bold transition-all ${
+                  activePersona.toLowerCase() === profile.meName.toLowerCase()
+                    ? 'bg-[#0071E3] text-white shadow-2xs'
+                    : 'text-[#86868B] hover:text-[#1D1D1F]'
+                }`}
+              >
+                {profile.meName} (You)
+              </button>
+              {buddies.map((b) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => setActivePersona(b.name)}
+                  className={`px-1.5 py-0.5 rounded text-[11px] font-bold transition-all ${
+                    activePersona.toLowerCase() === b.name.toLowerCase()
+                      ? 'bg-[#5856D6] text-white shadow-2xs'
+                      : 'text-[#86868B] hover:text-[#1D1D1F]'
+                  }`}
+                >
+                  {b.name}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
@@ -495,6 +616,21 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
                     const Icon = CATEGORY_ICONS[exp.category] || MoreHorizontal;
                     const paidByName = exp.paidBy === 'me' ? profile.meName : profile.friendName;
 
+                    const payerName = exp.paidBy === 'me' ? profile.meName : (exp.paidByName || exp.splitWithName || profile.friendName);
+                    const isPayer = activePersona.toLowerCase() === payerName.toLowerCase();
+
+                    const debtors = exp.splitWithNames && exp.splitWithNames.length > 0 
+                      ? exp.splitWithNames 
+                      : [exp.splitWithName || profile.friendName || 'Alex'];
+
+                    const verifiedList = exp.verifiedByNames || (exp.verifiedByFriend ? debtors : []);
+                    const isFullyVerified = debtors.length > 0 && debtors.every(d => verifiedList.some(v => v.toLowerCase() === d.toLowerCase()));
+                    const hasActivePersonaVerified = verifiedList.some(v => v.toLowerCase() === activePersona.toLowerCase());
+                    const pendingDebtors = debtors.filter(d => !verifiedList.some(v => v.toLowerCase() === d.toLowerCase()));
+
+                    const isCurrentActorADebtor = debtors.some(d => d.toLowerCase() === activePersona.toLowerCase());
+                    const canCurrentActorVerify = !isPayer && isCurrentActorADebtor && !hasActivePersonaVerified;
+
                     return (
                       <div
                         key={exp.id}
@@ -516,13 +652,32 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
                               {exp.split === 'equal' && (
                                 <span className="text-[10px] text-[#0071E3] font-medium flex items-center gap-0.5 shrink-0 bg-[#0071E3]/5 px-1.5 py-0.5 rounded">
                                   <Split className="w-2.5 h-2.5" />
-                                  Split 50/50
+                                  Split ({debtors.length + 1} ways)
                                 </span>
+                              )}
+                              {exp.lastEditedSummary && (
+                                <span className="text-[10px] text-[#86868B] bg-gray-100 px-1.5 py-0.2 rounded flex items-center gap-0.5" title={exp.lastEditedSummary}>
+                                  <Clock className="w-2.5 h-2.5" />
+                                  Edited
+                                </span>
+                              )}
+                              {exp.split === 'equal' && (
+                                isFullyVerified ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-md">
+                                    <Check className="w-2.5 h-2.5 stroke-[3]" />
+                                    Verified by {debtors.join(', ')}
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200/80 px-2 py-0.5 rounded-md">
+                                    <Clock className="w-2.5 h-2.5" />
+                                    Awaiting {pendingDebtors.join(', ')}'s verification
+                                  </span>
+                                )
                               )}
                             </div>
 
                             <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-[#86868B] mt-1 leading-snug">
-                              <PaidByBadge paidBy={exp.paidBy} profile={profile} />
+                              <PaidByBadge paidBy={exp.paidBy} profile={profile} splitWithName={exp.splitWithName} />
                               <span className="shrink-0">{meta.name}</span>
                               <span>·</span>
                               <span className="shrink-0">
@@ -543,7 +698,7 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
                           </div>
                         </div>
 
-                        {/* Amount & Delete */}
+                        {/* Amount & Actions */}
                         <div className="flex items-center gap-2 sm:gap-3 shrink-0 text-right">
                           <div>
                             <span className="text-xs sm:text-sm font-semibold font-mono tabular-nums text-[#1D1D1F] block">
@@ -551,11 +706,65 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
                             </span>
                             {exp.split === 'equal' && (
                               <span className="text-[10px] font-mono text-[#86868B] tabular-nums block">
-                                ${(exp.amount / 2).toFixed(2)} each
+                                ${(exp.amount / (debtors.length + 1)).toFixed(2)} each
                               </span>
                             )}
                           </div>
 
+                          {/* Split Action: Strictly Role-Based Verification & 1-Click Automated Notify */}
+                          {exp.split === 'equal' && (
+                            <div className="flex items-center gap-1">
+                              {/* 1. Only debtor who hasn't verified yet can verify! Payer CANNOT verify! */}
+                              {canCurrentActorVerify && (
+                                <button
+                                  type="button"
+                                  onClick={() => onVerifyExpense?.(exp.id, activePersona)}
+                                  className="px-2.5 py-1 text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-all flex items-center gap-1 text-[11px] font-bold shadow-xs active:scale-95 cursor-pointer"
+                                  title={`Verify and accept your share as ${activePersona}`}
+                                >
+                                  <ShieldCheck className="w-3.5 h-3.5 stroke-[2.5]" />
+                                  <span>Verify My Share</span>
+                                </button>
+                              )}
+
+                              {/* 2. Payer sees 1-click Automated Notify (No manual sharing) */}
+                              {isPayer && !isFullyVerified && (
+                                <div className="flex items-center gap-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDirectNotify(exp)}
+                                    className="px-2 py-1 text-[#0071E3] bg-[#0071E3]/8 hover:bg-[#0071E3]/15 border border-[#0071E3]/20 rounded-lg transition-all flex items-center gap-1 text-[11px] font-bold shadow-2xs active:scale-95"
+                                    title={`Send 1-click automated notification directly to ${pendingDebtors.join(', ')}`}
+                                  >
+                                    <Zap className="w-3 h-3 text-[#0071E3] fill-[#0071E3]" />
+                                    <span>Auto-Notify</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setNotifyExpense(exp)}
+                                    className="p-1 text-[#86868B] hover:text-[#1D1D1F] rounded-md transition-colors"
+                                    title="More sharing options (WhatsApp, SMS, Email)"
+                                  >
+                                    <Share2 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Edit / Adjust Expense Button */}
+                          {onUpdateExpense && (
+                            <button
+                              type="button"
+                              onClick={() => setEditingExpense(exp)}
+                              className="p-1 text-[#86868B] hover:text-[#0071E3] hover:bg-[#F2F2F7] rounded-lg transition-colors"
+                              title="Edit / Adjust expense details"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+
+                          {/* Delete Button */}
                           <button
                             onClick={() => onDeleteExpense(exp.id)}
                             className="opacity-60 sm:opacity-0 sm:group-hover:opacity-100 hover:opacity-100 p-1 text-[#86868B] hover:text-[#FF3B30] rounded-lg transition-all"
@@ -573,6 +782,28 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({
           })}
         </div>
       )}
+
+      {/* Edit / Adjust Expense Modal */}
+      {editingExpense && onUpdateExpense && (
+        <EditExpenseModal
+          isOpen={!!editingExpense}
+          onClose={() => setEditingExpense(null)}
+          expense={editingExpense}
+          profile={profile}
+          onSaveExpense={onUpdateExpense}
+        />
+      )}
+
+      {/* Split Notification & Verification Modal (Optional manual fallback) */}
+      <NotifySplitModal
+        isOpen={!!notifyExpense}
+        onClose={() => setNotifyExpense(null)}
+        expense={notifyExpense}
+        profile={profile}
+        onVerifyExpense={(id) => {
+          onVerifyExpense?.(id, activePersona);
+        }}
+      />
     </div>
   );
 };

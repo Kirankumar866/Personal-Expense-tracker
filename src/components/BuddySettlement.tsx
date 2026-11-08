@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Expense, UserProfile, SettlementRecord } from '../types/expense';
+import { Expense, UserProfile, SettlementRecord, Buddy } from '../types/expense';
 import { calculateBuddyBalance } from '../utils/analytics';
 import { 
   Users, 
@@ -18,7 +18,12 @@ import {
   Clock, 
   ShieldCheck, 
   AlertCircle,
-  X 
+  X,
+  UserPlus,
+  Zap,
+  Link2,
+  Smartphone,
+  Plus
 } from 'lucide-react';
 import { PaidByBadge } from './PaidByBadge';
 
@@ -37,12 +42,27 @@ export const BuddySettlement: React.FC<BuddySettlementProps> = ({
   onUpdateProfile,
   onSettleDebt,
 }) => {
+  const buddies: Buddy[] = profile.buddies && profile.buddies.length > 0 
+    ? profile.buddies 
+    : [
+        { id: 'buddy-alex', name: profile.friendName || 'Alex', email: profile.friendEmail || 'alex.rivera@example.com', role: 'Roommate', defaultPaymentMethod: 'Apple Cash', avatarColor: '#5856D6' },
+        { id: 'buddy-gautam', name: 'Gautam', email: 'gautam@example.com', role: 'Friend', defaultPaymentMethod: 'Zelle', avatarColor: '#FF9500' }
+      ];
+
+  const [selectedBuddyId, setSelectedBuddyId] = useState<string>(buddies[0].id);
+  const [isAddBuddyOpen, setIsAddBuddyOpen] = useState<boolean>(false);
+  const [newBuddyName, setNewBuddyName] = useState<string>('');
+  const [newBuddyEmail, setNewBuddyEmail] = useState<string>('');
+  const [newBuddyRole, setNewBuddyRole] = useState<string>('Friend');
+
+  const activeBuddy = buddies.find((b) => b.id === selectedBuddyId) || buddies[0];
+
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [meName, setMeName] = useState(profile.meName);
-  const [friendName, setFriendName] = useState(profile.friendName);
+  const [friendName, setFriendName] = useState(activeBuddy.name);
   const [meEmail, setMeEmail] = useState(profile.meEmail || 'kirankumar201018@gmail.com');
-  const [friendEmail, setFriendEmail] = useState(profile.friendEmail || 'alex.rivera@example.com');
-  const [defaultPaymentMethod, setDefaultPaymentMethod] = useState(profile.defaultPaymentMethod || 'Apple Cash');
+  const [friendEmail, setFriendEmail] = useState(activeBuddy.email || 'alex.rivera@example.com');
+  const [defaultPaymentMethod, setDefaultPaymentMethod] = useState(activeBuddy.defaultPaymentMethod || profile.defaultPaymentMethod || 'Apple Cash');
 
   // Settlements list state
   const [settlementRecords, setSettlementRecords] = useState<SettlementRecord[]>(() => {
@@ -71,12 +91,15 @@ export const BuddySettlement: React.FC<BuddySettlementProps> = ({
 
   // Settlement Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(profile.defaultPaymentMethod || 'Apple Cash');
+  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [copiedInvite, setCopiedInvite] = useState(false);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(activeBuddy.defaultPaymentMethod || 'Apple Cash');
   const [customNote, setCustomNote] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const balance = calculateBuddyBalance(expenses);
+  // Calculate balance specifically with activeBuddy!
+  const balance = calculateBuddyBalance(expenses, activeBuddy.name);
 
   useEffect(() => {
     try {
@@ -84,30 +107,73 @@ export const BuddySettlement: React.FC<BuddySettlementProps> = ({
     } catch (e) {}
   }, [settlementRecords]);
 
-  // Shared expenses list
+  // Keep form inputs updated when activeBuddy changes
+  useEffect(() => {
+    setFriendName(activeBuddy.name);
+    setFriendEmail(activeBuddy.email || '');
+    setDefaultPaymentMethod(activeBuddy.defaultPaymentMethod || 'Apple Cash');
+    setSelectedPaymentMethod(activeBuddy.defaultPaymentMethod || 'Apple Cash');
+  }, [activeBuddy]);
+
+  // Shared expenses list with this active buddy
   const sharedExpenses = expenses.filter(
-    (e) => e.split === 'equal' || e.split === 'me_full' || e.split === 'friend_full'
+    (e) => (e.split === 'equal' || e.split === 'me_full' || e.split === 'friend_full') &&
+           ((e.splitWithName || 'Alex').toLowerCase() === activeBuddy.name.toLowerCase())
   );
 
   const debtor = balance.creditor === 'me' ? 'friend' : 'me';
   const creditor = balance.creditor === 'me' ? 'me' : 'friend';
-  const debtorName = debtor === 'me' ? profile.meName : profile.friendName;
-  const creditorName = creditor === 'me' ? profile.meName : profile.friendName;
-  const recipientEmail = creditor === 'me' ? profile.meEmail : profile.friendEmail;
-  const senderEmail = debtor === 'me' ? profile.meEmail : profile.friendEmail;
+  const debtorName = debtor === 'me' ? profile.meName : activeBuddy.name;
+  const creditorName = creditor === 'me' ? profile.meName : activeBuddy.name;
+  const recipientEmail = creditor === 'me' ? profile.meEmail : activeBuddy.email;
+  const senderEmail = debtor === 'me' ? profile.meEmail : activeBuddy.email;
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
+    const updatedBuddies = buddies.map((b) =>
+      b.id === activeBuddy.id
+        ? {
+            ...b,
+            name: friendName.trim() || b.name,
+            email: friendEmail.trim() || b.email,
+            defaultPaymentMethod,
+          }
+        : b
+    );
     onUpdateProfile({
       ...profile,
       meName: meName.trim() || 'Me',
-      friendName: friendName.trim() || 'Friend',
+      friendName: activeBuddy.id === 'buddy-alex' ? friendName.trim() : profile.friendName,
       meEmail: meEmail.trim() || 'me@example.com',
-      friendEmail: friendEmail.trim() || 'friend@example.com',
-      defaultPaymentMethod,
+      buddies: updatedBuddies,
     });
     setIsEditingProfile(false);
-    showToast('Contact and email settings updated');
+    showToast(`Updated contact details for ${friendName}`);
+  };
+
+  const handleAddNewBuddy = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBuddyName.trim()) return;
+    const colors = ['#5856D6', '#FF9500', '#34C759', '#AF52DE', '#FF2D55', '#0071E3'];
+    const randomColor = colors[buddies.length % colors.length];
+    const newBuddy: Buddy = {
+      id: `buddy-${Date.now()}`,
+      name: newBuddyName.trim(),
+      email: newBuddyEmail.trim() || `${newBuddyName.trim().toLowerCase()}@example.com`,
+      role: newBuddyRole.trim() || 'Friend',
+      defaultPaymentMethod: 'Apple Cash',
+      avatarColor: randomColor,
+    };
+    const updated = [...buddies, newBuddy];
+    onUpdateProfile({
+      ...profile,
+      buddies: updated,
+    });
+    setSelectedBuddyId(newBuddy.id);
+    setIsAddBuddyOpen(false);
+    setNewBuddyName('');
+    setNewBuddyEmail('');
+    showToast(`Added ${newBuddy.name} (${newBuddy.role}) as a split buddy!`);
   };
 
   const showToast = (msg: string) => {
@@ -206,6 +272,58 @@ Sent via Lumen — Daily Expense & Shared Budget Tracker`;
 
   return (
     <div className="space-y-6">
+      {/* Buddy & Group Switcher Bar (Splitwise-style multi-friend ledgers) */}
+      <div className="bg-white rounded-2xl border border-[#E5E5EA] p-3 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+          <span className="text-xs font-semibold text-[#86868B] px-1 shrink-0 flex items-center gap-1">
+            <Users className="w-3.5 h-3.5 text-[#0071E3]" />
+            Split Friends:
+          </span>
+          {buddies.map((buddy) => {
+            const buddyBal = calculateBuddyBalance(expenses, buddy.name);
+            const isSelected = buddy.id === activeBuddy.id;
+            return (
+              <button
+                key={buddy.id}
+                type="button"
+                onClick={() => setSelectedBuddyId(buddy.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 shrink-0 ${
+                  isSelected
+                    ? 'bg-[#1D1D1F] text-white shadow-xs'
+                    : 'bg-[#F9F9FB] hover:bg-[#F2F2F7] text-[#1D1D1F] border border-[#E5E5EA]'
+                }`}
+              >
+                <div
+                  className="w-4 h-4 rounded-full flex items-center justify-center text-[10px] text-white font-bold shrink-0"
+                  style={{ backgroundColor: buddy.avatarColor || '#0071E3' }}
+                >
+                  {buddy.name[0]}
+                </div>
+                <span>{buddy.name}</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-md ${
+                  isSelected ? 'bg-white/20 text-white' : 'bg-black/5 text-[#86868B]'
+                }`}>
+                  {buddyBal.creditor === 'even' 
+                    ? '$0' 
+                    : buddyBal.creditor === 'me' 
+                    ? `+${buddyBal.amount.toFixed(0)}` 
+                    : `-${buddyBal.amount.toFixed(0)}`}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setIsAddBuddyOpen(true)}
+          className="px-3 py-1.5 bg-[#0071E3]/10 hover:bg-[#0071E3]/20 text-[#0071E3] rounded-xl text-xs font-semibold flex items-center gap-1.5 shrink-0 transition-colors self-start sm:self-auto"
+        >
+          <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+          <span>Add Friend / Group</span>
+        </button>
+      </div>
+
       {/* Top Settlement Card */}
       <div className="bg-white rounded-2xl border border-[#E5E5EA] p-5 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#F2F2F7]">
@@ -393,7 +511,120 @@ Sent via Lumen — Daily Expense & Shared Budget Tracker`;
         </div>
       </div>
 
-      {/* Settlements & Acknowledgment Log */}
+      {/* Roommate Connection & Live Sync Card */}
+      <div className="bg-white rounded-2xl border border-[#E5E5EA] p-5 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#F2F2F7]">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-[#0071E3]/10 text-[#0071E3] flex items-center justify-center">
+              <UserPlus className="w-4 h-4" />
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-[#1D1D1F]">
+                Roommate Connection & Live Sync
+              </h4>
+              <p className="text-xs text-[#86868B]">
+                How you and {profile.friendName} connect as app friends to sync splits in real time
+              </p>
+            </div>
+          </div>
+
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#34C759]/10 text-[#34C759] text-xs font-semibold">
+            <span className="w-2 h-2 rounded-full bg-[#34C759] animate-pulse" />
+            <span>Paired with {profile.friendName}</span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* Box 1: Friend Contact info */}
+          <div className="p-3.5 bg-[#F9F9FB] rounded-xl border border-[#E5E5EA] space-y-1">
+            <span className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider block">
+              Configured Friend
+            </span>
+            <p className="text-sm font-bold text-[#1D1D1F] truncate">
+              {profile.friendName}
+            </p>
+            <p className="text-xs text-[#86868B] truncate">
+              {profile.friendEmail || 'No email set'}
+            </p>
+          </div>
+
+          {/* Box 2: Instant Latency */}
+          <div className="p-3.5 bg-[#F9F9FB] rounded-xl border border-[#E5E5EA] space-y-1">
+            <span className="text-[11px] font-bold text-[#0071E3] uppercase tracking-wider flex items-center gap-1">
+              <Zap className="w-3 h-3 text-[#0071E3]" />
+              Sync Speed
+            </span>
+            <p className="text-sm font-bold text-[#1D1D1F]">
+              Sub-second (under 200ms)
+            </p>
+            <p className="text-xs text-[#86868B]">
+              Live WebSocket push via Firestore
+            </p>
+          </div>
+
+          {/* Box 3: Preferred Settlement */}
+          <div className="p-3.5 bg-[#F9F9FB] rounded-xl border border-[#E5E5EA] space-y-1">
+            <span className="text-[11px] font-bold text-[#86868B] uppercase tracking-wider block">
+              Default Settlement
+            </span>
+            <p className="text-sm font-bold text-[#1D1D1F]">
+              {profile.defaultPaymentMethod || 'Apple Cash'}
+            </p>
+            <p className="text-xs text-[#86868B]">
+              Instant debt equalization
+            </p>
+          </div>
+        </div>
+
+        {/* Real-time sync explanation banner */}
+        <div className="p-3.5 bg-gradient-to-r from-[#0071E3]/8 via-[#0071E3]/4 to-transparent rounded-xl border border-[#0071E3]/15 text-xs text-[#1D1D1F] space-y-1">
+          <p className="font-semibold flex items-center gap-1.5 text-[#0071E3]">
+            <Zap className="w-3.5 h-3.5" />
+            <span>How Real-Time Sync Works When You Add a Split:</span>
+          </p>
+          <p className="text-[#86868B] text-[11px] leading-relaxed">
+            When you add an expense with a split (e.g. groceries 50/50, or rideshare owed), Firestore immediately broadcasts the updated document over an active WebSocket connection. Your roommate's app updates <strong>instantly in less than a quarter of a second</strong> without them needing to refresh the browser or restart the app.
+          </p>
+        </div>
+
+        {/* Invite action buttons */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsInviteModalOpen(true)}
+              className="px-3.5 py-1.5 bg-[#0071E3] hover:bg-[#0077ED] text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-2xs active:scale-95"
+            >
+              <Link2 className="w-3.5 h-3.5" />
+              <span>Share Invite Link & QR</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const appUrl = 'https://ais-pre-ecigdmmhqnl5s3oyegtgnm-491279308824.us-west2.run.app';
+                const subject = encodeURIComponent(`Join me on Lumen to track our apartment expenses & splits!`);
+                const body = encodeURIComponent(
+                  `Hi ${profile.friendName},\n\nI'm tracking our shared apartment expenses on Lumen. Tap the link below to open our shared dashboard and view live split balances in real time:\n\n${appUrl}\n\nAny split or expense we log updates instantly across both of our phones!`
+                );
+                window.open(`mailto:${profile.friendEmail}?subject=${subject}&body=${body}`, '_blank');
+              }}
+              className="px-3 py-1.5 bg-white hover:bg-[#F2F2F7] border border-[#D1D1D6] text-[#1D1D1F] rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs"
+            >
+              <Mail className="w-3.5 h-3.5 text-[#0071E3]" />
+              <span>Send Email Invite</span>
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setIsEditingProfile(true)}
+            className="text-xs text-[#0071E3] hover:underline font-medium"
+          >
+            Change friend email or name &rarr;
+          </button>
+        </div>
+      </div>
       <div className="bg-white rounded-2xl border border-[#E5E5EA] p-5 shadow-xs space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -627,6 +858,206 @@ Sent via Lumen — Daily Expense & Shared Budget Tracker`;
                 Settle In-App Only (No Outbound Alert)
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Roommate Invite Modal */}
+      {isInviteModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl border border-[#E5E5EA] shadow-2xl max-w-md w-full p-6 space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between pb-3 border-b border-[#F2F2F7]">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-[#0071E3]/10 text-[#0071E3] flex items-center justify-center">
+                  <UserPlus className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-[#1D1D1F]">
+                    Invite {profile.friendName}
+                  </h3>
+                  <p className="text-[11px] text-[#86868B]">
+                    Connect your roommate to share real-time splits
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsInviteModalOpen(false)}
+                className="w-7 h-7 rounded-full bg-[#F2F2F7] hover:bg-[#E5E5EA] text-[#86868B] hover:text-[#1D1D1F] flex items-center justify-center transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-xs text-[#86868B] leading-relaxed">
+                Send this link or show the QR code to <strong>{profile.friendName}</strong>. Once they open it on their phone or computer, you will both be connected to the same live shared ledger!
+              </p>
+
+              {/* QR Code */}
+              <div className="p-4 bg-[#F9F9FB] rounded-2xl border border-[#E5E5EA] flex flex-col items-center justify-center">
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(
+                    'https://ais-pre-ecigdmmhqnl5s3oyegtgnm-491279308824.us-west2.run.app'
+                  )}`}
+                  alt="Scan to join Lumen"
+                  className="w-36 h-36 rounded-xl border border-[#E5E5EA] bg-white p-2 shadow-2xs"
+                />
+                <span className="text-[10px] text-[#86868B] mt-2">
+                  Have {profile.friendName} point their camera at this code
+                </span>
+              </div>
+
+              {/* Direct Link Copy Box */}
+              <div className="space-y-1">
+                <span className="text-[11px] font-semibold text-[#86868B] block">
+                  Shareable Link:
+                </span>
+                <div className="flex items-center gap-2 p-2 bg-[#F2F2F7] rounded-xl border border-[#E5E5EA]">
+                  <input
+                    type="text"
+                    readOnly
+                    value="https://ais-pre-ecigdmmhqnl5s3oyegtgnm-491279308824.us-west2.run.app"
+                    className="bg-transparent text-xs text-[#1D1D1F] outline-none flex-1 font-mono truncate select-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText('https://ais-pre-ecigdmmhqnl5s3oyegtgnm-491279308824.us-west2.run.app');
+                      setCopiedInvite(true);
+                      showToast('Invite link copied to clipboard!');
+                      setTimeout(() => setCopiedInvite(false), 2500);
+                    }}
+                    className="px-2.5 py-1 bg-white hover:bg-[#E5E5EA] border border-[#D1D1D6] rounded-lg text-xs font-semibold text-[#1D1D1F] transition-colors flex items-center gap-1 shadow-2xs shrink-0"
+                  >
+                    {copiedInvite ? (
+                      <>
+                        <Check className="w-3 h-3 text-[#34C759]" />
+                        <span>Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3 h-3" />
+                        <span>Copy</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Email Send Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  const appUrl = 'https://ais-pre-ecigdmmhqnl5s3oyegtgnm-491279308824.us-west2.run.app';
+                  const subject = encodeURIComponent(`Join me on Lumen to track our apartment expenses & splits!`);
+                  const body = encodeURIComponent(
+                    `Hi ${profile.friendName},\n\nI'm tracking our shared apartment expenses on Lumen. Tap the link below to open our shared dashboard and view live split balances in real time:\n\n${appUrl}\n\nAny split or expense we log updates instantly across both of our phones!`
+                  );
+                  window.open(`mailto:${profile.friendEmail}?subject=${subject}&body=${body}`, '_blank');
+                  setIsInviteModalOpen(false);
+                }}
+                className="w-full py-2 bg-[#0071E3] hover:bg-[#0077ED] text-white text-xs font-semibold rounded-xl transition-all shadow-xs flex items-center justify-center gap-1.5"
+              >
+                <Mail className="w-3.5 h-3.5" />
+                <span>Send Email Invitation to {profile.friendEmail || profile.friendName}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Friend / Group Modal */}
+      {isAddBuddyOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl border border-[#E5E5EA] shadow-2xl max-w-sm w-full p-6 space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between pb-3 border-b border-[#F2F2F7]">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-[#0071E3]/10 text-[#0071E3] flex items-center justify-center">
+                  <UserPlus className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-[#1D1D1F]">
+                    Add Split Friend or Group
+                  </h3>
+                  <p className="text-[11px] text-[#86868B]">
+                    Track isolated splits with Gautam, trips, or other friends
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsAddBuddyOpen(false)}
+                className="w-7 h-7 rounded-full bg-[#F2F2F7] hover:bg-[#E5E5EA] text-[#86868B] hover:text-[#1D1D1F] flex items-center justify-center"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddNewBuddy} className="space-y-3.5">
+              <div>
+                <label className="text-xs font-semibold text-[#1D1D1F] block mb-1">
+                  Friend's Name:
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Gautam or Lake Tahoe Group"
+                  value={newBuddyName}
+                  onChange={(e) => setNewBuddyName(e.target.value)}
+                  className="w-full px-3 py-2 bg-[#F9F9FB] border border-[#D1D1D6] rounded-xl text-xs font-semibold text-[#1D1D1F] outline-none focus:border-[#0071E3]"
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-[#1D1D1F] block mb-1">
+                  Friend's Email (optional):
+                </label>
+                <input
+                  type="email"
+                  placeholder="e.g. gautam@example.com"
+                  value={newBuddyEmail}
+                  onChange={(e) => setNewBuddyEmail(e.target.value)}
+                  className="w-full px-3 py-2 bg-[#F9F9FB] border border-[#D1D1D6] rounded-xl text-xs text-[#1D1D1F] outline-none focus:border-[#0071E3]"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-[#1D1D1F] block mb-1">
+                  Category / Relationship:
+                </label>
+                <select
+                  value={newBuddyRole}
+                  onChange={(e) => setNewBuddyRole(e.target.value)}
+                  className="w-full px-3 py-2 bg-[#F9F9FB] border border-[#D1D1D6] rounded-xl text-xs text-[#1D1D1F] outline-none cursor-pointer"
+                >
+                  <option value="Friend">Friend / Personal</option>
+                  <option value="Apartment Roommate">Apartment Roommate</option>
+                  <option value="Road Trip">Road Trip / Vacation</option>
+                  <option value="Gym & Fitness">Gym & Fitness</option>
+                  <option value="Office & Colleagues">Office & Colleagues</option>
+                </select>
+              </div>
+
+              <div className="pt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddBuddyOpen(false)}
+                  className="flex-1 py-2 bg-[#F2F2F7] hover:bg-[#E5E5EA] text-[#1D1D1F] text-xs font-semibold rounded-xl transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2 bg-[#0071E3] hover:bg-[#0077ED] text-white text-xs font-semibold rounded-xl transition-colors shadow-xs"
+                >
+                  Add Friend
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

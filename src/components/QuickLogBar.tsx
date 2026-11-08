@@ -17,7 +17,11 @@ import {
   User,
   Users,
   Split,
-  Tag
+  Tag,
+  Mic,
+  MicOff,
+  Loader2,
+  X
 } from 'lucide-react';
 
 interface QuickLogBarProps {
@@ -48,18 +52,109 @@ export const QuickLogBar: React.FC<QuickLogBarProps> = ({
   const [category, setCategory] = useState<ExpenseCategory>('uber');
   const [paidBy, setPaidBy] = useState<'me' | 'friend'>('me');
   const [split, setSplit] = useState<'none' | 'equal'>('none');
+  const buddies = profile.buddies && profile.buddies.length > 0 
+    ? profile.buddies 
+    : [
+        { id: 'buddy-alex', name: profile.friendName || 'Alex', email: profile.friendEmail || '', role: 'Roommate' },
+        { id: 'buddy-gautam', name: 'Gautam', email: 'gautam@example.com', role: 'Friend' }
+      ];
+
+  const [splitWith, setSplitWith] = useState<string>(buddies[0]?.name || 'Alex');
   const [expenseDateStr, setExpenseDateStr] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [showSuccessToast, setShowSuccessToast] = useState<boolean>(false);
   const [lastLoggedTitle, setLastLoggedTitle] = useState<string>('');
+  const [showAiPrompt, setShowAiPrompt] = useState<boolean>(false);
+  const [aiPromptText, setAiPromptText] = useState<string>('');
+  const [isAnalyzingAi, setIsAnalyzingAi] = useState<boolean>(false);
+  const [isListeningMic, setIsListeningMic] = useState<boolean>(false);
+  const [aiFeedback, setAiFeedback] = useState<string | null>(null);
+  const [inputError, setInputError] = useState<string | null>(null);
 
   const parsedAmount = parseFloat(amountStr) || 0;
   const currentCategoryMeta = getCategoryMeta(category);
   const CurrentIcon = CATEGORY_ICONS[category] || MoreHorizontal;
 
+  const handleParseAiText = async (textToParse: string) => {
+    if (!textToParse.trim()) return;
+    setIsAnalyzingAi(true);
+    setAiFeedback(null);
+
+    try {
+      const res = await fetch('/api/parse-expense-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: textToParse,
+          meName: profile.meName,
+          buddies,
+        }),
+      });
+      const json = await res.json();
+      if (json.success && json.data) {
+        const d = json.data;
+        if (d.amount) setAmountStr(d.amount.toString());
+        if (d.title) setTitle(d.title);
+        if (d.category) setCategory(d.category);
+        if (d.paidBy) setPaidBy(d.paidBy);
+        if (d.split) setSplit(d.split);
+        if (d.splitWithName) setSplitWith(d.splitWithName);
+
+        setAiFeedback(`✨ AI Parsed: "${d.title}" ($${Number(d.amount).toFixed(2)}) → ${getCategoryMeta(d.category).name} · ${d.split === 'equal' ? `Split with ${d.splitWithName || 'Alex'}` : 'Personal'}`);
+        setShowAiPrompt(false);
+        setAiPromptText('');
+      }
+    } catch (err) {
+      console.error('Error parsing text with AI:', err);
+    } finally {
+      setIsAnalyzingAi(false);
+    }
+  };
+
+  const handleToggleMic = () => {
+    if (isListeningMic) {
+      setIsListeningMic(false);
+      return;
+    }
+
+    const SpeechRec = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+    if (!SpeechRec) {
+      alert('Speech recognition is not supported in this browser. You can type your description into the AI field directly!');
+      return;
+    }
+
+    const recognition = new SpeechRec();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    setIsListeningMic(true);
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setIsListeningMic(false);
+      setAiPromptText(transcript);
+      handleParseAiText(transcript);
+    };
+
+    recognition.onerror = () => {
+      setIsListeningMic(false);
+    };
+
+    recognition.onend = () => {
+      setIsListeningMic(false);
+    };
+
+    recognition.start();
+  };
+
   const handleSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (parsedAmount <= 0) return;
+    if (parsedAmount <= 0) {
+      setInputError('Please enter an expense amount (e.g. $12.50)');
+      return;
+    }
 
+    setInputError(null);
     const finalTitle = title.trim() || `${CATEGORIES[category]?.name || 'General'} Expense`;
 
     const d = new Date();
@@ -75,9 +170,10 @@ export const QuickLogBar: React.FC<QuickLogBarProps> = ({
       date: d.toISOString(),
       paidBy,
       split,
+      splitWithName: split === 'equal' ? splitWith : undefined,
     });
 
-    setLastLoggedTitle(`${finalTitle} ($${parsedAmount.toFixed(2)})`);
+    setLastLoggedTitle(`${finalTitle} ($${parsedAmount.toFixed(2)}) · ${split === 'equal' ? `Split with ${splitWith}` : 'Personal'}`);
     setShowSuccessToast(true);
     setTimeout(() => setShowSuccessToast(false), 2800);
 
@@ -92,8 +188,8 @@ export const QuickLogBar: React.FC<QuickLogBarProps> = ({
   };
 
   return (
-    <div className="w-full bg-white rounded-2xl border border-[#E5E5EA] shadow-xs p-4 sm:p-5 transition-all">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3.5">
+    <div className="w-full bg-white rounded-2xl border border-[#E5E5EA] shadow-xs p-4 sm:p-5 transition-all space-y-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
         <div className="flex items-center gap-2 flex-wrap">
           <div className="w-7 h-7 rounded-xl bg-[#0071E3]/12 text-[#0071E3] flex items-center justify-center shrink-0">
             <Plus className="w-4 h-4 stroke-[2.5]" />
@@ -101,6 +197,17 @@ export const QuickLogBar: React.FC<QuickLogBarProps> = ({
           <h2 className="text-sm font-bold tracking-tight text-[#1D1D1F]">
             Quick Expense Entry
           </h2>
+
+          <button
+            type="button"
+            onClick={() => setShowAiPrompt(!showAiPrompt)}
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-gradient-to-r from-[#5856D6]/10 to-[#AF52DE]/10 hover:from-[#5856D6]/15 hover:to-[#AF52DE]/15 text-[#5856D6] border border-[#5856D6]/20 text-[11px] font-bold transition-all active:scale-95 cursor-pointer shadow-2xs"
+            title="Describe your expense with voice or text to auto-fill"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-[#5856D6]" />
+            <span>Voice / Describe with AI</span>
+          </button>
+
           {onOpenReceiptScanner && (
             <button
               type="button"
@@ -151,6 +258,83 @@ export const QuickLogBar: React.FC<QuickLogBarProps> = ({
         </div>
       </div>
 
+      {/* AI Voice & Natural Language Input Panel */}
+      {showAiPrompt && (
+        <div className="p-3.5 bg-gradient-to-r from-[#5856D6]/8 via-[#AF52DE]/6 to-[#0071E3]/8 rounded-xl border border-[#5856D6]/20 space-y-2 animate-in fade-in duration-200">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-[#5856D6] flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5" />
+              Speak or describe your expense:
+            </span>
+            <span className="text-[11px] text-[#86868B] hidden sm:inline">
+              e.g. "Dinner with Alex at Chipotle $28.50" or "Uber to airport $45"
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="e.g. Paid $34 for dinner at Trader Joe's split 50/50 with Alex"
+              value={aiPromptText}
+              onChange={(e) => setAiPromptText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleParseAiText(aiPromptText);
+                }
+              }}
+              className="flex-1 px-3 py-2 bg-white border border-[#E5E5EA] rounded-xl text-xs text-[#1D1D1F] outline-none focus:border-[#5856D6]"
+            />
+
+            <button
+              type="button"
+              onClick={handleToggleMic}
+              className={`p-2 rounded-xl border transition-all ${
+                isListeningMic
+                  ? 'bg-red-500 text-white animate-pulse border-red-600'
+                  : 'bg-white text-[#5856D6] hover:bg-[#5856D6]/10 border-[#5856D6]/30'
+              }`}
+              title={isListeningMic ? 'Listening... click to stop' : 'Click to speak'}
+            >
+              {isListeningMic ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleParseAiText(aiPromptText)}
+              disabled={isAnalyzingAi || !aiPromptText.trim()}
+              className="px-3.5 py-2 bg-[#5856D6] hover:bg-[#4745B8] text-white text-xs font-bold rounded-xl transition-all disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+            >
+              {isAnalyzingAi ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Analyzing...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Parse with AI</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* AI Success Feedback Banner */}
+      {aiFeedback && (
+        <div className="p-2.5 px-3 bg-[#5856D6]/10 border border-[#5856D6]/20 rounded-xl text-xs font-semibold text-[#5856D6] flex items-center justify-between">
+          <span>{aiFeedback}</span>
+          <button
+            type="button"
+            onClick={() => setAiFeedback(null)}
+            className="text-[#86868B] hover:text-[#1D1D1F]"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-3">
         {/* Main Row: Amount + Description + Category + Submit */}
         <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 sm:gap-3 items-center">
@@ -165,8 +349,15 @@ export const QuickLogBar: React.FC<QuickLogBarProps> = ({
               min="0.01"
               placeholder="0.00"
               value={amountStr}
-              onChange={(e) => setAmountStr(e.target.value)}
-              className="w-full pl-8 pr-3 py-2.5 bg-[#F9F9FB] focus:bg-white border border-[#E5E5EA] focus:border-[#0071E3] focus:ring-2 focus:ring-[#0071E3]/15 rounded-xl text-lg font-bold text-[#1D1D1F] font-mono tabular-nums transition-all outline-none"
+              onChange={(e) => {
+                setAmountStr(e.target.value);
+                if (inputError) setInputError(null);
+              }}
+              className={`w-full pl-8 pr-3 py-2.5 bg-[#F9F9FB] focus:bg-white border rounded-xl text-lg font-bold text-[#1D1D1F] font-mono tabular-nums transition-all outline-none ${
+                inputError 
+                  ? 'border-red-400 focus:border-red-500 ring-2 ring-red-100' 
+                  : 'border-[#E5E5EA] focus:border-[#0071E3] focus:ring-2 focus:ring-[#0071E3]/15'
+              }`}
               required
             />
           </div>
@@ -210,18 +401,21 @@ export const QuickLogBar: React.FC<QuickLogBarProps> = ({
           <div className="sm:col-span-2">
             <button
               type="submit"
-              disabled={parsedAmount <= 0}
-              className={`w-full py-2.5 px-4 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap active:scale-98 ${
-                parsedAmount > 0
-                  ? 'bg-gradient-to-r from-[#0071E3] to-[#0077ED] hover:from-[#0066CC] hover:to-[#0071E3] text-white shadow-xs'
-                  : 'bg-[#F2F2F7] text-[#86868B] cursor-not-allowed'
-              }`}
+              className="w-full py-2.5 px-4 rounded-xl text-sm font-bold bg-gradient-to-r from-[#0071E3] to-[#0077ED] hover:from-[#0066CC] hover:to-[#0071E3] text-white shadow-xs transition-all flex items-center justify-center gap-1.5 whitespace-nowrap active:scale-98 cursor-pointer"
             >
               <Plus className="w-4 h-4 stroke-[2.5]" />
               Log Now
             </button>
           </div>
         </div>
+
+        {/* Input Error Message */}
+        {inputError && (
+          <div className="py-1.5 px-3 bg-red-50 border border-red-200/80 rounded-xl flex items-center gap-2 text-xs text-red-600 animate-in fade-in duration-150">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+            <span className="font-semibold">{inputError}</span>
+          </div>
+        )}
 
         {/* Secondary Options Strip: Paid By & Split & Date with icons */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-2 text-xs border-t border-[#F2F2F7]">
@@ -252,7 +446,7 @@ export const QuickLogBar: React.FC<QuickLogBarProps> = ({
                   }`}
                 >
                   <Users className="w-3 h-3" />
-                  <span>{profile.friendName}</span>
+                  <span>{split === 'equal' ? splitWith : profile.friendName}</span>
                 </button>
               </div>
             </div>
@@ -273,6 +467,24 @@ export const QuickLogBar: React.FC<QuickLogBarProps> = ({
                 <span>{split === 'equal' ? 'Split 50/50' : 'Solo (100%)'}</span>
               </button>
             </div>
+
+            {/* If Split 50/50 is selected, choose who to split with: Alex, Gautam, etc. */}
+            {split === 'equal' && (
+              <div className="flex items-center gap-1.5 bg-[#0071E3]/10 px-2 py-1 rounded-xl border border-[#0071E3]/25 animate-in fade-in zoom-in-95">
+                <span className="text-[11px] font-semibold text-[#0071E3]">With:</span>
+                <select
+                  value={splitWith}
+                  onChange={(e) => setSplitWith(e.target.value)}
+                  className="bg-transparent text-xs font-bold text-[#0071E3] outline-none cursor-pointer"
+                >
+                  {buddies.map((b) => (
+                    <option key={b.id} value={b.name} className="text-[#1D1D1F]">
+                      {b.name} ({b.role || 'Friend'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {/* Date incurred picker with icon */}
             <div className="flex items-center gap-1.5">

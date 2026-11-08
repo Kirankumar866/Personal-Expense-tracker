@@ -10,6 +10,7 @@ import { User, Users } from 'lucide-react';
 interface PaidByBadgeProps {
   paidBy: 'me' | 'friend';
   profile: UserProfile;
+  splitWithName?: string;
   className?: string;
   showIcon?: boolean;
 }
@@ -17,11 +18,13 @@ interface PaidByBadgeProps {
 export const PaidByBadge: React.FC<PaidByBadgeProps> = ({
   paidBy,
   profile,
+  splitWithName,
   className = '',
   showIcon = true,
 }) => {
   const isMe = paidBy === 'me';
-  const name = isMe ? profile.meName : profile.friendName;
+  const friendDisplayName = splitWithName || profile.friendName || 'Alex';
+  const name = isMe ? profile.meName : friendDisplayName;
 
   return (
     <span
@@ -39,6 +42,9 @@ export const PaidByBadge: React.FC<PaidByBadgeProps> = ({
         )
       )}
       <span>Paid by {name}</span>
+      {isMe && splitWithName && (
+        <span className="opacity-75 font-normal text-[9.5px]">· split w/ {splitWithName}</span>
+      )}
     </span>
   );
 };

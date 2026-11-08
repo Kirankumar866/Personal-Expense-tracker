@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { 
   auth, 
   db, 
@@ -26,7 +26,7 @@ import {
   limit, 
   getDocFromServer
 } from 'firebase/firestore';
-import { Expense, Activity } from '../types/expense';
+import { Expense, Activity, UserProfile, BudgetConfig } from '../types/expense';
 import { loadStoredExpenses } from '../utils/storage';
 
 interface FirebaseContextType {
@@ -36,12 +36,17 @@ interface FirebaseContextType {
   signInWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   addExpenseToCloud: (expense: Expense) => Promise<void>;
+  updateExpenseInCloud: (expense: Expense) => Promise<void>;
   deleteExpenseFromCloud: (expenseId: string) => Promise<void>;
   logActivityToCloud: (action: Activity['action'], description: string, amount?: number) => Promise<void>;
   cloudExpenses: Expense[];
   cloudActivities: Activity[];
+  cloudProfile: UserProfile | null;
+  cloudBudget: BudgetConfig | null;
   syncLocalExpensesToCloud: (localExpenses: Expense[]) => Promise<number>;
   resetToDemoDataInCloud: () => Promise<void>;
+  saveProfileToCloud: (profile: UserProfile) => Promise<void>;
+  saveBudgetToCloud: (budget: BudgetConfig) => Promise<void>;
 }
 
 const FirebaseContext = createContext<FirebaseContextType | undefined>(undefined);
@@ -52,6 +57,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [isCloudConnected, setIsCloudConnected] = useState<boolean>(false);
   const [cloudExpenses, setCloudExpenses] = useState<Expense[]>([]);
   const [cloudActivities, setCloudActivities] = useState<Activity[]>([]);
+  const [cloudProfile, setCloudProfile] = useState<UserProfile | null>(null);
+  const [cloudBudget, setCloudBudget] = useState<BudgetConfig | null>(null);
+  const hasSeededRef = useRef<boolean>(false);
 
   // 1. Initial connection verification test on boot per skill instructions
   useEffect(() => {
@@ -64,6 +72,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           console.warn('Firebase connection notice: client is offline or network restricted.');
           setIsCloudConnected(false);
         } else {
+          // Connected to Firestore
           setIsCloudConnected(true);
         }
       }
@@ -73,22 +82,48 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // 2. Auth State Listener
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       setAuthLoading(false);
+      hasSeededRef.current = false;
+
+      // Sync account details upon sign in
+      if (currentUser) {
+        try {
+          const accountRef = doc(db, 'users', currentUser.uid, 'account', 'info');
+          await setDoc(
+            accountRef,
+            {
+              uid: currentUser.uid,
+              email: currentUser.email || '',
+              displayName: currentUser.displayName || '',
+              photoURL: currentUser.photoURL || '',
+              emailVerified: currentUser.emailVerified || false,
+              lastLoginAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+        } catch (e) {
+          console.warn('Account sync notice:', e);
+        }
+      }
     });
 
     return () => unsubscribe();
   }, []);
 
-  // 3. Real-Time Snapshot Listener for User's Expenses & Activities
+  // 3. Real-Time Snapshot Listeners for User's Cloud Data in Firestore
   useEffect(() => {
     if (!user) {
       setCloudExpenses([]);
       setCloudActivities([]);
+      setCloudProfile(null);
+      setCloudBudget(null);
       return;
     }
 
+    // A. Expenses Collection
     const expensesPath = `users/${user.uid}/expenses`;
     const expensesCol = collection(db, 'users', user.uid, 'expenses');
     
@@ -105,15 +140,27 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             category: d.category || 'other',
             date: d.date || new Date().toISOString(),
             paidBy: d.paidBy || 'me',
+            paidByName: d.paidByName || undefined,
             split: d.split || 'none',
+            splitWithName: d.splitWithName || undefined,
+            splitWithNames: Array.isArray(d.splitWithNames) ? d.splitWithNames : undefined,
+            verifiedByFriend: !!d.verifiedByFriend,
+            verifiedByNames: Array.isArray(d.verifiedByNames) ? d.verifiedByNames : undefined,
+            verifiedAt: d.verifiedAt ? Number(d.verifiedAt) : undefined,
+            lastEditedAt: d.lastEditedAt ? Number(d.lastEditedAt) : undefined,
+            lastEditedSummary: d.lastEditedSummary || undefined,
             notes: d.notes || '',
             createdAt: Number(d.createdAt) || Date.now(),
           });
         });
 
-        // If the user's cloud collection is completely brand new (0 docs),
-        // automatically seed initial default records so they have full data to explore
-        if (items.length === 0 && !snapshot.metadata.hasPendingWrites) {
+        items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        setCloudExpenses(items);
+        setIsCloudConnected(true);
+
+        // If the user has zero cloud docs on first load, seed with current local data
+        if (items.length === 0 && !hasSeededRef.current && !snapshot.metadata.hasPendingWrites) {
+          hasSeededRef.current = true;
           const defaults = loadStoredExpenses();
           if (defaults.length > 0) {
             for (const exp of defaults) {
@@ -133,18 +180,14 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               }).catch(() => {});
             }
           }
-        } else {
-          items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          setCloudExpenses(items);
         }
-        setIsCloudConnected(true);
       },
       (error) => {
         handleFirestoreError(error, OperationType.GET, expensesPath);
       }
     );
 
-    // Activities Feed: users/{uid}/activities
+    // B. Activities Feed: users/{uid}/activities
     const activitiesPath = `users/${user.uid}/activities`;
     const activitiesCol = collection(db, 'users', user.uid, 'activities');
     const q = query(activitiesCol, orderBy('timestamp', 'desc'), limit(50));
@@ -171,9 +214,52 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     );
 
+    // C. User Profile: users/{uid}/profile/config
+    const profileRef = doc(db, 'users', user.uid, 'profile', 'config');
+    const unsubProfile = onSnapshot(
+      profileRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const d = docSnap.data();
+          setCloudProfile({
+            meName: d.meName || user.displayName || 'You',
+            friendName: d.friendName || 'Alex',
+            meEmail: d.meEmail || user.email || '',
+            friendEmail: d.friendEmail || '',
+            defaultPaymentMethod: d.defaultPaymentMethod || 'Apple Cash',
+          });
+        }
+      },
+      (err) => {
+        console.warn('Profile listener notice:', err);
+      }
+    );
+
+    // D. Budget Config: users/{uid}/profile/budget
+    const budgetRef = doc(db, 'users', user.uid, 'profile', 'budget');
+    const unsubBudget = onSnapshot(
+      budgetRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const d = docSnap.data();
+          setCloudBudget({
+            totalMonthlyBudget: Number(d.totalMonthlyBudget) || 1200,
+            categoryBudgets: d.categoryBudgets || {},
+            currency: d.currency || '$',
+            alertThresholdPercent: Number(d.alertThresholdPercent) || 80,
+          });
+        }
+      },
+      (err) => {
+        console.warn('Budget listener notice:', err);
+      }
+    );
+
     return () => {
       unsubExpenses();
       unsubActivities();
+      unsubProfile();
+      unsubBudget();
     };
   }, [user]);
 
@@ -184,7 +270,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (result.user) {
         await logActivityToCloud(
           'signed_in',
-          `${result.user.displayName || 'User'} signed in via Google account`
+          `${result.user.displayName || 'User'} connected to Firestore Cloud Database`
         );
       }
     } catch (err: any) {
@@ -199,12 +285,14 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       await signOut(auth);
       setCloudExpenses([]);
       setCloudActivities([]);
+      setCloudProfile(null);
+      setCloudBudget(null);
     } catch (err: any) {
       console.error('Logout error:', err);
     }
   };
 
-  // Add / Update Expense in Firestore
+  // Add Expense to Firestore
   const addExpenseToCloud = async (expense: Expense) => {
     if (!user) return;
     const path = `users/${user.uid}/expenses/${expense.id}`;
@@ -218,7 +306,15 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         category: expense.category,
         date: expense.date,
         paidBy: expense.paidBy,
+        paidByName: expense.paidByName || null,
         split: expense.split,
+        splitWithName: expense.splitWithName || null,
+        splitWithNames: expense.splitWithNames || null,
+        verifiedByFriend: expense.verifiedByFriend || false,
+        verifiedByNames: expense.verifiedByNames || null,
+        verifiedAt: expense.verifiedAt || null,
+        lastEditedAt: expense.lastEditedAt || null,
+        lastEditedSummary: expense.lastEditedSummary || null,
         notes: expense.notes || '',
         createdAt: expense.createdAt || Date.now(),
         updatedAt: new Date().toISOString(),
@@ -228,6 +324,41 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         'logged_expense',
         `Logged "${expense.title}" for $${expense.amount.toFixed(2)} (${expense.paidBy === 'me' ? 'Paid by you' : 'Paid by roommate'})`,
         expense.amount
+      );
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, path);
+    }
+  };
+
+  // Update Expense in Firestore
+  const updateExpenseInCloud = async (expense: Expense) => {
+    if (!user) return;
+    const path = `users/${user.uid}/expenses/${expense.id}`;
+    try {
+      const expenseRef = doc(db, 'users', user.uid, 'expenses', expense.id);
+      await setDoc(
+        expenseRef,
+        {
+          id: expense.id,
+          userId: user.uid,
+          title: expense.title,
+          amount: Number(expense.amount),
+          category: expense.category,
+          date: expense.date,
+          paidBy: expense.paidBy,
+          paidByName: expense.paidByName || null,
+          split: expense.split,
+          splitWithName: expense.splitWithName || null,
+          splitWithNames: expense.splitWithNames || null,
+          verifiedByFriend: expense.verifiedByFriend ?? false,
+          verifiedByNames: expense.verifiedByNames || null,
+          verifiedAt: expense.verifiedAt ?? null,
+          lastEditedAt: expense.lastEditedAt ?? null,
+          lastEditedSummary: expense.lastEditedSummary ?? null,
+          notes: expense.notes || '',
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
       );
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, path);
@@ -288,6 +419,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           date: exp.date,
           paidBy: exp.paidBy,
           split: exp.split,
+          splitWithName: exp.splitWithName || null,
           notes: exp.notes || '',
           createdAt: exp.createdAt || Date.now(),
           updatedAt: new Date().toISOString(),
@@ -301,7 +433,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (count > 0) {
       await logActivityToCloud(
         'logged_expense',
-        `Synced ${count} expenses to cloud database`
+        `Synced ${count} expenses to Firestore Database`
       );
     }
 
@@ -315,6 +447,53 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     await syncLocalExpensesToCloud(defaultDummies);
   };
 
+  // Save User Profile config to Firestore
+  const saveProfileToCloud = async (profile: UserProfile) => {
+    if (!user) return;
+    const path = `users/${user.uid}/profile/config`;
+    try {
+      const ref = doc(db, 'users', user.uid, 'profile', 'config');
+      await setDoc(
+        ref,
+        {
+          userId: user.uid,
+          meName: profile.meName,
+          friendName: profile.friendName,
+          meEmail: profile.meEmail || user.email || '',
+          friendEmail: profile.friendEmail,
+          defaultPaymentMethod: profile.defaultPaymentMethod,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    } catch (err) {
+      console.warn('Profile sync notice:', err);
+    }
+  };
+
+  // Save Budget config to Firestore
+  const saveBudgetToCloud = async (budget: BudgetConfig) => {
+    if (!user) return;
+    const path = `users/${user.uid}/profile/budget`;
+    try {
+      const ref = doc(db, 'users', user.uid, 'profile', 'budget');
+      await setDoc(
+        ref,
+        {
+          userId: user.uid,
+          totalMonthlyBudget: budget.totalMonthlyBudget,
+          categoryBudgets: budget.categoryBudgets,
+          currency: budget.currency,
+          alertThresholdPercent: budget.alertThresholdPercent,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    } catch (err) {
+      console.warn('Budget sync notice:', err);
+    }
+  };
+
   return (
     <FirebaseContext.Provider
       value={{
@@ -324,12 +503,17 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         signInWithGoogle,
         logout,
         addExpenseToCloud,
+        updateExpenseInCloud,
         deleteExpenseFromCloud,
         logActivityToCloud,
         cloudExpenses,
         cloudActivities,
+        cloudProfile,
+        cloudBudget,
         syncLocalExpensesToCloud,
         resetToDemoDataInCloud,
+        saveProfileToCloud,
+        saveBudgetToCloud,
       }}
     >
       {children}

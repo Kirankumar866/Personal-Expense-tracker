@@ -18,6 +18,15 @@ export interface CategoryMeta {
   description: string;
 }
 
+export interface Buddy {
+  id: string;
+  name: string;
+  email: string;
+  defaultPaymentMethod?: string;
+  avatarColor?: string;
+  role?: string;
+}
+
 export interface Expense {
   id: string;
   amount: number;
@@ -25,8 +34,17 @@ export interface Expense {
   category: ExpenseCategory;
   date: string; // ISO 8601 string
   paidBy: 'me' | 'friend';
+  paidByName?: string; // e.g. 'Kiran', 'Alex', 'Gautam'
   split: 'none' | 'equal' | 'me_full' | 'friend_full';
+  splitWithName?: string; // e.g. 'Alex' or 'Gautam'
+  splitWithNames?: string[]; // e.g. ['Alex', 'Gautam'] for multi-person splits
+  splitWithId?: string; // e.g. 'buddy-alex' or 'buddy-gautam'
   notes?: string;
+  verifiedByFriend?: boolean;
+  verifiedByNames?: string[]; // names of roommates/friends who verified their share
+  verifiedAt?: number;
+  lastEditedAt?: number;
+  lastEditedSummary?: string;
   createdAt: number;
 }
 
@@ -43,6 +61,7 @@ export interface UserProfile {
   meEmail: string;
   friendEmail: string;
   defaultPaymentMethod: string;
+  buddies?: Buddy[];
 }
 
 export interface SettlementRecord {

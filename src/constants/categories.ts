@@ -1,4 +1,4 @@
-import { CategoryMeta, ExpenseCategory, BudgetConfig, UserProfile } from '../types/expense';
+import { CategoryMeta, ExpenseCategory, BudgetConfig, UserProfile, Buddy } from '../types/expense';
 
 export const ACTIVE_CATEGORIES: ExpenseCategory[] = [
   'uber',
@@ -123,10 +123,30 @@ export const DEFAULT_BUDGET_CONFIG: BudgetConfig = {
   alertThresholdPercent: 80,
 };
 
+export const DEFAULT_BUDDIES: Buddy[] = [
+  {
+    id: 'buddy-alex',
+    name: 'Alex',
+    email: 'alex.rivera@example.com',
+    defaultPaymentMethod: 'Apple Cash',
+    avatarColor: '#5856D6',
+    role: 'Apartment Roommate',
+  },
+  {
+    id: 'buddy-gautam',
+    name: 'Gautam',
+    email: 'gautam@example.com',
+    defaultPaymentMethod: 'Zelle',
+    avatarColor: '#FF9500',
+    role: 'Friend & Trips',
+  },
+];
+
 export const DEFAULT_USER_PROFILE: UserProfile = {
   meName: 'Kiran',
   friendName: 'Alex',
   meEmail: 'kirankumar201018@gmail.com',
   friendEmail: 'alex.rivera@example.com',
   defaultPaymentMethod: 'Apple Cash',
+  buddies: DEFAULT_BUDDIES,
 };

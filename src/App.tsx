@@ -4,12 +4,10 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Expense, BudgetConfig, UserProfile, ExpenseCategory } from './types/expense';
+import { Expense, BudgetConfig, UserProfile } from './types/expense';
 import { 
   loadStoredExpenses, 
   saveStoredExpenses, 
-  loadStoredLiveExpenses,
-  saveStoredLiveExpenses,
   loadStoredBudgetConfig, 
   saveStoredBudgetConfig, 
   loadStoredUserProfile, 
@@ -36,69 +34,67 @@ import { SyncModal } from './components/SyncModal';
 import { MonthlyLogsView } from './components/MonthlyLogsView';
 import { ReceiptScannerModal } from './components/ReceiptScannerModal';
 import { ActivityFeedModal } from './components/ActivityFeedModal';
+import { LogExpenseModal } from './components/LogExpenseModal';
 import { FirebaseProvider, useFirebase } from './context/FirebaseContext';
 import { 
-  Calendar, 
   Users, 
-  Cloud, 
-  Check, 
   ArrowUpRight, 
-  Sparkles, 
-  FlaskConical, 
-  Database, 
-  ArrowRight,
-  RotateCcw,
-  Copy
+  Check 
 } from 'lucide-react';
 
 function TrackerContent() {
   const { 
     user, 
-    isCloudConnected, 
-    databaseMode,
-    setDatabaseMode,
+    isCloudConnected,
     cloudExpenses, 
     cloudActivities, 
+    cloudProfile,
+    cloudBudget,
     addExpenseToCloud, 
+    updateExpenseInCloud,
     deleteExpenseFromCloud, 
     logActivityToCloud,
-    syncLocalExpensesToCloud,
-    copySandboxToLive
+    saveProfileToCloud,
+    saveBudgetToCloud
   } = useFirebase();
 
-  const [localSandboxExpenses, setLocalSandboxExpenses] = useState<Expense[]>(() => loadStoredExpenses());
-  const [localLiveExpenses, setLocalLiveExpenses] = useState<Expense[]>(() => loadStoredLiveExpenses());
+  const [localExpenses, setLocalExpenses] = useState<Expense[]>(() => loadStoredExpenses());
   const [budget, setBudget] = useState<BudgetConfig>(() => loadStoredBudgetConfig());
   const [profile, setProfile] = useState<UserProfile>(() => loadStoredUserProfile());
 
+  // Sync cloud profile & budget when user is authenticated
+  useEffect(() => {
+    if (cloudProfile) {
+      setProfile(cloudProfile);
+    }
+  }, [cloudProfile]);
+
+  useEffect(() => {
+    if (cloudBudget) {
+      setBudget(cloudBudget);
+    }
+  }, [cloudBudget]);
+
   const [currentTab, setCurrentTab] = useState<'dashboard' | 'comparison' | 'monthly' | 'budget' | 'buddy' | 'expenses'>('dashboard');
-  const [userFilter, setUserFilter] = useState<'all' | 'me' | 'friend'>('all');
+  const [userFilter, setUserFilter] = useState<string>('all');
+  const [isLogExpenseModalOpen, setIsLogExpenseModalOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [isActivityModalOpen, setIsActivityModalOpen] = useState(false);
-  const [hasPromptedCloudSync, setHasPromptedCloudSync] = useState(false);
-  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
-  const [copySuccessToast, setCopySuccessToast] = useState(false);
+  const [syncToast, setSyncToast] = useState<string | null>(null);
 
-  // Active expenses depending on databaseMode: Sandbox vs Live
+  // Active expenses: Cloud data when signed in and available; otherwise local storage
   const expenses = useMemo(() => {
-    if (databaseMode === 'sandbox') {
-      if (user && cloudExpenses.length > 0) return cloudExpenses;
-      return localSandboxExpenses;
-    } else {
-      if (user && cloudExpenses.length > 0) return cloudExpenses;
-      return localLiveExpenses;
+    if (user && cloudExpenses.length > 0) {
+      return cloudExpenses;
     }
-  }, [databaseMode, user, cloudExpenses, localSandboxExpenses, localLiveExpenses]);
+    return localExpenses;
+  }, [user, cloudExpenses, localExpenses]);
 
-  // Persist to localStorage
+  // Persist local state
   useEffect(() => {
-    saveStoredExpenses(localSandboxExpenses);
-  }, [localSandboxExpenses]);
-
-  useEffect(() => {
-    saveStoredLiveExpenses(localLiveExpenses);
-  }, [localLiveExpenses]);
+    saveStoredExpenses(localExpenses);
+  }, [localExpenses]);
 
   useEffect(() => {
     saveStoredBudgetConfig(budget);
@@ -138,15 +134,14 @@ function TrackerContent() {
       createdAt: Date.now(),
     };
 
-    if (databaseMode === 'sandbox') {
-      setLocalSandboxExpenses((prev) => [newExpense, ...prev]);
-    } else {
-      setLocalLiveExpenses((prev) => [newExpense, ...prev]);
-    }
+    setLocalExpenses((prev) => [newExpense, ...prev]);
 
     if (user) {
       await addExpenseToCloud(newExpense);
     }
+
+    setSyncToast(`Logged "${newExpense.title}" ($${newExpense.amount.toFixed(2)})`);
+    setTimeout(() => setSyncToast(null), 3000);
   };
 
   const handleBatchAddExpenses = async (newExpenses: Omit<Expense, 'id' | 'createdAt'>[]) => {
@@ -156,11 +151,7 @@ function TrackerContent() {
       createdAt: Date.now() + idx,
     }));
 
-    if (databaseMode === 'sandbox') {
-      setLocalSandboxExpenses((prev) => [...created, ...prev]);
-    } else {
-      setLocalLiveExpenses((prev) => [...created, ...prev]);
-    }
+    setLocalExpenses((prev) => [...created, ...prev]);
 
     if (user) {
       for (const exp of created) {
@@ -168,33 +159,120 @@ function TrackerContent() {
       }
       await logActivityToCloud(
         'scanned_receipt',
-        `[${databaseMode.toUpperCase()}] Scanned receipt and imported ${created.length} line items with voice analysis`
+        `Scanned receipt and imported ${created.length} line items with voice analysis`
       );
     }
+
+    setSyncToast(`Successfully imported ${created.length} expense${created.length > 1 ? 's' : ''} from receipt!`);
+    setTimeout(() => setSyncToast(null), 3500);
   };
 
   const handleDeleteExpense = async (id: string) => {
-    if (databaseMode === 'sandbox') {
-      setLocalSandboxExpenses((prev) => prev.filter((e) => e.id !== id));
-    } else {
-      setLocalLiveExpenses((prev) => prev.filter((e) => e.id !== id));
-    }
+    setLocalExpenses((prev) => prev.filter((e) => e.id !== id));
 
     if (user) {
       await deleteExpenseFromCloud(id);
-      await logActivityToCloud('logged_expense', `[${databaseMode.toUpperCase()}] Deleted an expense record`);
+      await logActivityToCloud('logged_expense', `Deleted an expense record`);
     }
+  };
+
+  const handleVerifyExpense = async (id: string, verifierName: string) => {
+    const target = expenses.find((e) => e.id === id);
+    if (!target) return;
+
+    const debtors = target.splitWithNames && target.splitWithNames.length > 0
+      ? target.splitWithNames
+      : [target.splitWithName || profile.friendName || 'Alex'];
+
+    const currentVerified = target.verifiedByNames || (target.verifiedByFriend ? debtors : []);
+    const updatedVerified = Array.from(new Set([...currentVerified, verifierName]));
+    const isFullyVerified = debtors.every((d) => updatedVerified.some((v) => v.toLowerCase() === d.toLowerCase()));
+
+    const updated: Expense = {
+      ...target,
+      verifiedByNames: updatedVerified,
+      verifiedByFriend: isFullyVerified,
+      verifiedAt: Date.now(),
+    };
+
+    setLocalExpenses((prev) => prev.map((e) => (e.id === id ? updated : e)));
+
+    if (user) {
+      await updateExpenseInCloud(updated);
+      await logActivityToCloud('logged_expense', `${verifierName} verified their share for "${target.title}"`);
+    }
+
+    // Automated notification to other roommates that this user verified
+    try {
+      await fetch('/api/notify-buddy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expenseId: target.id,
+          expenseTitle: target.title,
+          amount: target.amount,
+          action: 'verified',
+          senderName: verifierName,
+          recipientName: target.paidBy === 'me' ? profile.meName : (target.splitWithName || 'Roommate'),
+          recipientEmail: profile.meEmail || 'kirankumar201018@gmail.com',
+        }),
+      });
+    } catch (e) {}
+
+    setSyncToast(`✅ ${verifierName} verified share for "${target.title}"!`);
+    setTimeout(() => setSyncToast(null), 3200);
+  };
+
+  const handleUpdateExpense = async (updatedExpense: Expense, diffSummary: string) => {
+    setLocalExpenses((prev) => prev.map((e) => (e.id === updatedExpense.id ? updatedExpense : e)));
+
+    if (user) {
+      await updateExpenseInCloud(updatedExpense);
+      await logActivityToCloud('logged_expense', `Adjusted "${updatedExpense.title}": ${diffSummary}`, updatedExpense.amount);
+    }
+
+    // Automated direct notification dispatch of adjustment and difference
+    if (updatedExpense.split === 'equal') {
+      const buddyName = updatedExpense.splitWithName || profile.friendName || 'Alex';
+      const buddy = profile.buddies?.find((b) => b.name.toLowerCase() === buddyName.toLowerCase());
+      const buddyEmail = buddy?.email || profile.friendEmail || 'alex.rivera@example.com';
+
+      try {
+        await fetch('/api/notify-buddy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            expenseId: updatedExpense.id,
+            expenseTitle: updatedExpense.title,
+            amount: updatedExpense.amount,
+            splitShare: updatedExpense.amount / 2,
+            action: 'updated',
+            changeDiff: diffSummary,
+            senderName: profile.meName,
+            recipientName: buddyName,
+            recipientEmail: buddyEmail,
+          }),
+        });
+      } catch (e) {}
+    }
+
+    setSyncToast(`Adjusted "${updatedExpense.title}" (${diffSummary}) & auto-notified roommate!`);
+    setTimeout(() => setSyncToast(null), 4000);
   };
 
   const handleUpdateBudget = async (newBudget: BudgetConfig) => {
     setBudget(newBudget);
     if (user) {
+      await saveBudgetToCloud(newBudget);
       await logActivityToCloud('updated_budget', `Updated monthly budget to $${newBudget.totalMonthlyBudget.toLocaleString()}`);
     }
   };
 
-  const handleUpdateProfile = (newProfile: UserProfile) => {
+  const handleUpdateProfile = async (newProfile: UserProfile) => {
     setProfile(newProfile);
+    if (user) {
+      await saveProfileToCloud(newProfile);
+    }
   };
 
   const handleSettleDebt = async (debtor: 'me' | 'friend', amount: number) => {
@@ -210,49 +288,30 @@ function TrackerContent() {
       createdAt: Date.now(),
     };
 
-    if (databaseMode === 'sandbox') {
-      setLocalSandboxExpenses((prev) => [settlementRecord, ...prev]);
-    } else {
-      setLocalLiveExpenses((prev) => [settlementRecord, ...prev]);
-    }
+    setLocalExpenses((prev) => [settlementRecord, ...prev]);
 
     if (user) {
       await addExpenseToCloud(settlementRecord);
-      await logActivityToCloud('settled', `[${databaseMode.toUpperCase()}] Settled debt balance of $${amount.toFixed(2)} between roommates`, amount);
+      await logActivityToCloud('settled', `Settled debt balance of $${amount.toFixed(2)} between roommates`, amount);
     }
   };
 
   const handleResetDemo = () => {
     const res = resetToDemoData();
-    setLocalSandboxExpenses(res.expenses);
+    setLocalExpenses(res.expenses);
     setBudget(res.budget);
     setProfile(res.profile);
   };
 
   const handleClearAll = () => {
-    if (databaseMode === 'sandbox') {
-      const res = clearAllData();
-      setLocalSandboxExpenses(res.expenses);
-    } else {
-      setLocalLiveExpenses([]);
-    }
+    const res = clearAllData();
+    setLocalExpenses(res.expenses);
   };
 
   const handleReloadFromStorage = () => {
-    setLocalSandboxExpenses(loadStoredExpenses());
-    setLocalLiveExpenses(loadStoredLiveExpenses());
+    setLocalExpenses(loadStoredExpenses());
     setBudget(loadStoredBudgetConfig());
     setProfile(loadStoredUserProfile());
-  };
-
-  const handleCopySandboxToLive = async () => {
-    if (user) {
-      await copySandboxToLive();
-    }
-    setLocalLiveExpenses([...localSandboxExpenses]);
-    setDatabaseMode('live');
-    setCopySuccessToast(true);
-    setTimeout(() => setCopySuccessToast(false), 3500);
   };
 
   return (
@@ -264,108 +323,18 @@ function TrackerContent() {
         userFilter={userFilter}
         onChangeUserFilter={setUserFilter}
         profile={profile}
-        onOpenQuickLog={() => {
-          const quickBarEl = document.getElementById('quick-log-section');
-          if (quickBarEl) {
-            quickBarEl.scrollIntoView({ behavior: 'smooth' });
-            const amountInput = quickBarEl.querySelector('input[type="number"]') as HTMLInputElement;
-            if (amountInput) amountInput.focus();
-          }
-        }}
+        onOpenQuickLog={() => setIsLogExpenseModalOpen(true)}
         onOpenSync={() => setIsSyncModalOpen(true)}
         onOpenReceiptScanner={() => setIsReceiptModalOpen(true)}
         onOpenActivityFeed={() => setIsActivityModalOpen(true)}
         activityCount={cloudActivities.length}
       />
 
-      {/* Database Mode Status Banner */}
-      {databaseMode === 'sandbox' ? (
-        <div className="bg-gradient-to-r from-[#FF9500]/12 via-[#FF9500]/6 to-white border-b border-[#FF9500]/25 px-4 py-2.5">
-          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5">
-              <div className="w-6 h-6 rounded-lg bg-[#FF9500]/20 text-[#FF9500] flex items-center justify-center shrink-0">
-                <FlaskConical className="w-3.5 h-3.5" />
-              </div>
-              <div>
-                <span className="text-xs font-bold text-[#1D1D1F] flex items-center gap-1.5">
-                  <span>Sandbox Environment (Table: <code className="font-mono text-[#FF9500] text-[11px] bg-white px-1.5 py-0.2 rounded border border-[#FF9500]/30">demo_expenses</code>)</span>
-                  <span className="px-1.5 py-0.2 bg-[#FF9500]/15 text-[#FF9500] text-[9px] uppercase font-bold rounded">Testing</span>
-                </span>
-                <p className="text-[11px] text-[#86868B] hidden sm:block">
-                  You are testing with dummy data. Real database is isolated and untouched.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 self-start sm:self-auto">
-              <button
-                type="button"
-                onClick={handleResetDemo}
-                className="px-2.5 py-1 text-xs font-semibold text-[#86868B] hover:text-[#1D1D1F] bg-white border border-[#E5E5EA] rounded-lg transition-colors flex items-center gap-1 shadow-2xs"
-                title="Reset mock dummy expenses"
-              >
-                <RotateCcw className="w-3 h-3" />
-                <span>Reset Dummy Data</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setDatabaseMode('live')}
-                className="px-3 py-1 bg-[#34C759] hover:bg-[#30B753] text-white text-xs font-semibold rounded-lg shadow-xs transition-all flex items-center gap-1 active:scale-95"
-              >
-                <span>Switch to Live Database</span>
-                <ArrowRight className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="bg-gradient-to-r from-[#34C759]/12 via-[#34C759]/6 to-white border-b border-[#34C759]/25 px-4 py-2.5">
-          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5">
-              <div className="w-6 h-6 rounded-lg bg-[#34C759]/20 text-[#34C759] flex items-center justify-center shrink-0">
-                <Database className="w-3.5 h-3.5" />
-              </div>
-              <div>
-                <span className="text-xs font-bold text-[#1D1D1F] flex items-center gap-1.5">
-                  <span>Live Production Database (Table: <code className="font-mono text-[#34C759] text-[11px] bg-white px-1.5 py-0.2 rounded border border-[#34C759]/30">expenses</code>)</span>
-                  <span className="px-1.5 py-0.2 bg-[#34C759]/15 text-[#34C759] text-[9px] uppercase font-bold rounded">Production</span>
-                </span>
-                <p className="text-[11px] text-[#86868B] hidden sm:block">
-                  Connected to your real Firestore database. All transactions logged here represent your actual financial records.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 self-start sm:self-auto">
-              {expenses.length === 0 && localSandboxExpenses.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleCopySandboxToLive}
-                  className="px-2.5 py-1 text-xs font-semibold text-[#0071E3] bg-[#0071E3]/10 hover:bg-[#0071E3]/15 border border-[#0071E3]/25 rounded-lg transition-colors flex items-center gap-1 shadow-2xs"
-                  title="Copy testing records over to live database"
-                >
-                  <Copy className="w-3 h-3" />
-                  <span>Copy Sandbox to Live</span>
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={() => setDatabaseMode('sandbox')}
-                className="px-3 py-1 bg-white hover:bg-[#F2F2F7] text-[#1D1D1F] border border-[#D1D1D6] text-xs font-semibold rounded-lg shadow-2xs transition-all flex items-center gap-1"
-              >
-                <span>Back to Sandbox</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Copy Success Toast */}
-      {copySuccessToast && (
-        <div className="bg-[#34C759] text-white text-xs font-semibold px-4 py-2 text-center animate-in fade-in duration-200">
-          ✓ Sandbox data successfully copied to your live production database!
+      {/* Sync Notification Toast */}
+      {syncToast && (
+        <div className="bg-[#34C759] text-white text-xs font-semibold px-4 py-2 text-center animate-in fade-in duration-200 flex items-center justify-center gap-2">
+          <Check className="w-3.5 h-3.5" />
+          <span>{syncToast}</span>
         </div>
       )}
 
@@ -397,7 +366,7 @@ function TrackerContent() {
               daysLeft={safeDailyData.daysLeft}
               projectedMonthTotal={safeDailyData.projectedMonthTotal}
               budget={budget}
-              userFilterName={userFilter === 'all' ? 'All Members' : userFilter === 'me' ? profile.meName : profile.friendName}
+              userFilterName={userFilter === 'all' ? 'All Members' : userFilter === 'me' ? profile.meName : userFilter}
             />
 
             {/* Live Roommate Split & Settle Quick Snapshot */}
@@ -446,6 +415,8 @@ function TrackerContent() {
             <ExpenseList
               expenses={expenses}
               onDeleteExpense={handleDeleteExpense}
+              onVerifyExpense={handleVerifyExpense}
+              onUpdateExpense={handleUpdateExpense}
               profile={profile}
               userFilter={userFilter}
             />
@@ -505,6 +476,8 @@ function TrackerContent() {
             <ExpenseList
               expenses={expenses}
               onDeleteExpense={handleDeleteExpense}
+              onVerifyExpense={handleVerifyExpense}
+              onUpdateExpense={handleUpdateExpense}
               profile={profile}
               userFilter={userFilter}
             />
@@ -518,7 +491,16 @@ function TrackerContent() {
           <div className="flex items-center gap-2">
             <span className="font-semibold text-[#1D1D1F]">Lumen</span>
             <span>·</span>
-            <span>Shared Expense Tracker · {databaseMode === 'sandbox' ? '🧪 Sandbox Mode (demo_expenses)' : '🟢 Live Database (expenses)'}</span>
+            <span>Shared Expense & Budget Tracker</span>
+            {user && (
+              <>
+                <span>·</span>
+                <span className="inline-flex items-center gap-1.5 text-[#34C759] font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#34C759]" />
+                  Synced as {user.email}
+                </span>
+              </>
+            )}
           </div>
 
           <div className="flex items-center gap-4">
@@ -560,6 +542,15 @@ function TrackerContent() {
         onClose={() => setIsReceiptModalOpen(false)}
         onAddExpenses={handleBatchAddExpenses}
         profile={profile}
+      />
+
+      {/* Dedicated Log Expense Modal */}
+      <LogExpenseModal
+        isOpen={isLogExpenseModalOpen}
+        onClose={() => setIsLogExpenseModalOpen(false)}
+        onAddExpense={handleAddExpense}
+        profile={profile}
+        onOpenReceiptScanner={() => setIsReceiptModalOpen(true)}
       />
 
       {/* Real-Time Activity Feed Modal */}

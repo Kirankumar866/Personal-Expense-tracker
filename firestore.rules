@@ -2,7 +2,7 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Global Safety Net: Default deny all
+    // Global Safety Net: Default deny all unmapped paths
     match /{document=**} {
       allow read, write: if false;
     }
@@ -15,6 +15,12 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    // Health check ping for boot verification
+    match /test/{docId} {
+      allow read: if true;
+    }
+
+    // User sandbox and production document trees
     match /users/{userId} {
       allow read, write: if isOwner(userId);
 
@@ -31,6 +37,10 @@ service cloud.firestore {
       }
 
       match /activities/{activityId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /{allChildren=**} {
         allow read, write: if isOwner(userId);
       }
     }

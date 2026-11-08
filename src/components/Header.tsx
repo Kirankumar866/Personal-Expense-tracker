@@ -33,8 +33,8 @@ import {
 interface HeaderProps {
   currentTab: 'dashboard' | 'comparison' | 'monthly' | 'budget' | 'buddy' | 'expenses';
   onSelectTab: (tab: 'dashboard' | 'comparison' | 'monthly' | 'budget' | 'buddy' | 'expenses') => void;
-  userFilter: 'all' | 'me' | 'friend';
-  onChangeUserFilter: (filter: 'all' | 'me' | 'friend') => void;
+  userFilter: string;
+  onChangeUserFilter: (filter: string) => void;
   profile: UserProfile;
   onOpenQuickLog: () => void;
   onOpenSync: () => void;
@@ -169,13 +169,21 @@ export const Header: React.FC<HeaderProps> = ({
               <User className="w-3.5 h-3.5 text-[#0071E3] shrink-0" />
               <select
                 value={userFilter}
-                onChange={(e) => onChangeUserFilter(e.target.value as 'all' | 'me' | 'friend')}
+                onChange={(e) => onChangeUserFilter(e.target.value)}
                 aria-label="Filter expenses by member"
                 className="bg-transparent font-semibold text-[#1D1D1F] outline-none cursor-pointer pr-1 text-xs"
               >
-                <option value="all">All Members</option>
-                <option value="me">{profile.meName}</option>
-                <option value="friend">{profile.friendName}</option>
+                <option value="all">All Outflows (Consolidated)</option>
+                <option value="me">{profile.meName} (Personal Only)</option>
+                {profile.buddies && profile.buddies.length > 0 ? (
+                  profile.buddies.map((b) => (
+                    <option key={b.id} value={b.name}>
+                      Split w/ {b.name} ({b.role || 'Friend'})
+                    </option>
+                  ))
+                ) : (
+                  <option value="friend">{profile.friendName}</option>
+                )}
               </select>
             </div>
 
@@ -386,12 +394,20 @@ export const Header: React.FC<HeaderProps> = ({
             <User className="w-3 h-3 text-[#0071E3] shrink-0" />
             <select
               value={userFilter}
-              onChange={(e) => onChangeUserFilter(e.target.value as 'all' | 'me' | 'friend')}
+              onChange={(e) => onChangeUserFilter(e.target.value)}
               className="bg-transparent font-medium text-[#1D1D1F] outline-none text-[11px] cursor-pointer"
             >
-              <option value="all">All Members</option>
+              <option value="all">All Outflows</option>
               <option value="me">{profile.meName}</option>
-              <option value="friend">{profile.friendName}</option>
+              {profile.buddies && profile.buddies.length > 0 ? (
+                profile.buddies.map((b) => (
+                  <option key={b.id} value={b.name}>
+                    {b.name}
+                  </option>
+                ))
+              ) : (
+                <option value="friend">{profile.friendName}</option>
+              )}
             </select>
           </div>
         </div>

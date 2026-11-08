@@ -1,8 +1,128 @@
 {
   "entities": {
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "Authenticated user Google account details and session metadata.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address",
+          "maxLength": 256
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User Google display name",
+          "maxLength": 128
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "User avatar photo URL",
+          "maxLength": 1024
+        },
+        "emailVerified": {
+          "type": "boolean",
+          "description": "Whether user email is verified"
+        },
+        "lastLoginAt": {
+          "type": "string",
+          "description": "ISO timestamp of most recent sign-in",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp when account details were synced",
+          "maxLength": 64
+        }
+      },
+      "required": ["uid", "email"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Personalized configuration for roommate tracking including names, emails, and payment methods.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "maxLength": 128
+        },
+        "meName": {
+          "type": "string",
+          "description": "Display name of the primary user",
+          "maxLength": 64
+        },
+        "friendName": {
+          "type": "string",
+          "description": "Display name of the roommate or friend",
+          "maxLength": 64
+        },
+        "meEmail": {
+          "type": "string",
+          "description": "Email address of the primary user",
+          "maxLength": 256
+        },
+        "friendEmail": {
+          "type": "string",
+          "description": "Email address of the roommate",
+          "maxLength": 256
+        },
+        "defaultPaymentMethod": {
+          "type": "string",
+          "description": "Preferred payment method (e.g. Apple Cash, Venmo, Zelle)",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp when profile was last updated",
+          "maxLength": 64
+        }
+      },
+      "required": ["userId", "meName", "friendName"]
+    },
+    "BudgetConfig": {
+      "title": "BudgetConfig",
+      "description": "Spending goals, monthly allowance limit, and individual category budgets.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "maxLength": 128
+        },
+        "totalMonthlyBudget": {
+          "type": "number",
+          "description": "Target monthly spending cap"
+        },
+        "categoryBudgets": {
+          "type": "object",
+          "description": "Individual monthly budget limits for each expense category"
+        },
+        "currency": {
+          "type": "string",
+          "description": "Currency symbol",
+          "maxLength": 16
+        },
+        "alertThresholdPercent": {
+          "type": "number",
+          "description": "Percentage alert threshold for budget pace (e.g. 80)"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp when budget was last updated",
+          "maxLength": 64
+        }
+      },
+      "required": ["userId", "totalMonthlyBudget", "categoryBudgets"]
+    },
     "Expense": {
       "title": "Expense",
-      "description": "An expense logged by a roommate with category, amount, split rule, and payment details.",
+      "description": "Personal or shared expense logged with category, split policy, notes, and payment info.",
       "type": "object",
       "properties": {
         "id": {
@@ -26,7 +146,7 @@
         },
         "category": {
           "type": "string",
-          "description": "Category key matching active categories",
+          "description": "Category key: uber, dining, groceries, housing, coffee, shopping, subscriptions, entertainment, other",
           "maxLength": 64
         },
         "date": {
@@ -41,8 +161,8 @@
         },
         "split": {
           "type": "string",
-          "description": "Split rule: 'equal' or 'none'",
-          "enum": ["equal", "none"]
+          "description": "Split rule: 'equal', 'none', 'me_full', 'friend_full'",
+          "enum": ["equal", "none", "me_full", "friend_full"]
         },
         "notes": {
           "type": "string",
@@ -61,43 +181,6 @@
         }
       },
       "required": ["id", "userId", "title", "amount", "category", "date", "paidBy", "split", "createdAt"]
-    },
-    "UserProfile": {
-      "title": "UserProfile",
-      "description": "Personalized configuration for roommate tracking including names, currency, and budgets.",
-      "type": "object",
-      "properties": {
-        "userId": {
-          "type": "string",
-          "description": "Firebase Auth UID",
-          "maxLength": 128
-        },
-        "meName": {
-          "type": "string",
-          "description": "Display name of the primary user",
-          "maxLength": 64
-        },
-        "friendName": {
-          "type": "string",
-          "description": "Display name of the roommate",
-          "maxLength": 64
-        },
-        "currency": {
-          "type": "string",
-          "description": "Currency symbol",
-          "maxLength": 16
-        },
-        "monthlyBudget": {
-          "type": "number",
-          "description": "Target monthly budget ceiling"
-        },
-        "updatedAt": {
-          "type": "string",
-          "description": "ISO timestamp when profile was last updated",
-          "maxLength": 64
-        }
-      },
-      "required": ["userId", "meName", "friendName", "currency", "monthlyBudget"]
     },
     "Activity": {
       "title": "Activity",
@@ -121,7 +204,7 @@
         },
         "action": {
           "type": "string",
-          "description": "The category of activity (e.g. logged_expense, scanned_receipt, settled)",
+          "description": "Action type (e.g. logged_expense, scanned_receipt, settled, updated_budget, signed_in)",
           "maxLength": 64
         },
         "description": {
@@ -143,29 +226,35 @@
     }
   },
   "firestore": {
-    "/users/{userId}/expenses/{expenseId}": {
+    "/users/{userId}/account/info": {
       "schema": {
-        "$ref": "#/entities/Expense"
+        "$ref": "#/entities/UserAccount"
       },
-      "description": "Production real database table for live expenses."
-    },
-    "/users/{userId}/demo_expenses/{expenseId}": {
-      "schema": {
-        "$ref": "#/entities/Expense"
-      },
-      "description": "Sandbox test database table for dummy testing data."
+      "description": "Google account details, avatar, and sign-in metadata."
     },
     "/users/{userId}/profile/config": {
       "schema": {
         "$ref": "#/entities/UserProfile"
       },
-      "description": "User profile, budget limits, and roommate settings."
+      "description": "Roommate settings, personal names, emails, and payment methods."
+    },
+    "/users/{userId}/profile/budget": {
+      "schema": {
+        "$ref": "#/entities/BudgetConfig"
+      },
+      "description": "Monthly spending budgets and individual category caps."
+    },
+    "/users/{userId}/expenses/{expenseId}": {
+      "schema": {
+        "$ref": "#/entities/Expense"
+      },
+      "description": "Personal and shared expenses with categories and split rules."
     },
     "/users/{userId}/activities/{activityId}": {
       "schema": {
         "$ref": "#/entities/Activity"
       },
-      "description": "Real-time stream of user and roommate activity events."
+      "description": "Real-time audit log of changes and roommate settlements."
     }
   }
 }

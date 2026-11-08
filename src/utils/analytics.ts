@@ -10,9 +10,9 @@ export interface DailySpendPoint {
 
 export function filterExpensesByUser(
   expenses: Expense[], 
-  userFilter: 'all' | 'me' | 'friend'
+  userFilter: string = 'all'
 ): Expense[] {
-  if (userFilter === 'all') return expenses;
+  if (!userFilter || userFilter === 'all') return expenses;
   return expenses.filter(e => {
     if (userFilter === 'me') {
       return e.paidBy === 'me' || (e.split === 'equal' && e.paidBy === 'friend');
@@ -20,27 +20,44 @@ export function filterExpensesByUser(
     if (userFilter === 'friend') {
       return e.paidBy === 'friend' || (e.split === 'equal' && e.paidBy === 'me');
     }
-    return true;
+    // Specific buddy by name (e.g. 'Alex', 'Gautam')
+    // Personal solo expenses do not belong to a roommate or friend
+    if (e.split === 'none' && e.paidBy === 'me') {
+      return false;
+    }
+    const buddyName = (e.splitWithName || 'Alex').toLowerCase();
+    const filterName = userFilter.toLowerCase();
+    return buddyName === filterName;
   });
 }
 
-export function calculateEffectiveAmount(expense: Expense, viewUser: 'all' | 'me' | 'friend'): number {
+export function calculateEffectiveAmount(expense: Expense, viewUser: string = 'all'): number {
   if (viewUser === 'all') return expense.amount;
   if (expense.split === 'equal') {
-    return expense.amount / 2;
+    if (viewUser === 'me') return expense.amount / 2;
+    const buddyName = (expense.splitWithName || 'Alex').toLowerCase();
+    if (viewUser === 'friend' || buddyName === viewUser.toLowerCase()) {
+      return expense.amount / 2;
+    }
+    return 0;
   }
   if (viewUser === 'me') {
     return expense.paidBy === 'me' ? expense.amount : 0;
   }
-  if (viewUser === 'friend') {
+  // Personal expenses do not belong to a buddy
+  if (expense.split === 'none' && expense.paidBy === 'me') {
+    return 0;
+  }
+  const buddyName = (expense.splitWithName || 'Alex').toLowerCase();
+  if (viewUser === 'friend' || buddyName === viewUser.toLowerCase()) {
     return expense.paidBy === 'friend' ? expense.amount : 0;
   }
-  return expense.amount;
+  return 0;
 }
 
 export function getMonthComparison(
   expenses: Expense[],
-  viewUser: 'all' | 'me' | 'friend' = 'all',
+  viewUser: string = 'all',
   targetDate: Date = new Date()
 ): PeriodComparison {
   const currentYear = targetDate.getFullYear();
@@ -126,7 +143,7 @@ export function getMonthComparison(
 
 export function getWeekComparison(
   expenses: Expense[],
-  viewUser: 'all' | 'me' | 'friend' = 'all',
+  viewUser: string = 'all',
   targetDate: Date = new Date()
 ): PeriodComparison & { dailyBreakdown: DailySpendPoint[] } {
   // Current 7 days vs previous 7 days (or current calendar week Mon-Sun)
@@ -242,11 +259,22 @@ export function getWeekComparison(
   };
 }
 
-export function calculateBuddyBalance(expenses: Expense[]): BuddyBalance {
+export function calculateBuddyBalance(
+  expenses: Expense[],
+  targetBuddyName?: string
+): BuddyBalance {
   let mePaidForFriend = 0;
   let friendPaidForMe = 0;
 
   expenses.forEach(e => {
+    // If filtering by a specific buddy (e.g. Alex vs Gautam)
+    if (targetBuddyName && targetBuddyName !== 'all') {
+      const buddy = (e.splitWithName || 'Alex').toLowerCase();
+      if (buddy !== targetBuddyName.toLowerCase()) {
+        return;
+      }
+    }
+
     if (e.split === 'equal') {
       const half = e.amount / 2;
       if (e.paidBy === 'me') {
@@ -410,7 +438,7 @@ export interface MonthOption {
 
 export function getHistoricalMonthOptions(
   expenses: Expense[],
-  viewUser: 'all' | 'me' | 'friend' = 'all'
+  viewUser: string = 'all'
 ): MonthOption[] {
   const monthMap = new Map<string, { year: number; month: number; total: number; count: number }>();
   const now = new Date();
@@ -491,7 +519,7 @@ export function getHistoricalMonthDetail(
   expenses: Expense[],
   year: number,
   month: number,
-  viewUser: 'all' | 'me' | 'friend' = 'all'
+  viewUser: string = 'all'
 ): HistoricalMonthDetail {
   const targetDate = new Date(year, month, 15);
   const comparison = getMonthComparison(expenses, viewUser, targetDate);
@@ -553,7 +581,7 @@ export interface MultiMonthRollup {
 
 export function getThreeMonthRollup(
   expenses: Expense[],
-  viewUser: 'all' | 'me' | 'friend' = 'all',
+  viewUser: string = 'all',
   numberOfMonths = 3
 ): MultiMonthRollup {
   const now = new Date();
